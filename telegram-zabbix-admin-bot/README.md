@@ -9,6 +9,8 @@ Bot Telegram để quản trị Zabbix nhanh từ chat.
 - `/ack <eventid> <message>` — acknowledge event
 - `/disable <host>` — yêu cầu disable host (cần `/confirm`)
 - `/enable <host>` — yêu cầu enable host (cần `/confirm`)
+- `/mainton <host> [minutes]` — bật maintenance cho host (cần `/confirm`)
+- `/maintoff <host>` — tắt maintenance cho host (cần `/confirm`)
 - `/confirm` — xác nhận thao tác nguy hiểm đang chờ
 - `/cancel` — hủy thao tác đang chờ
 
