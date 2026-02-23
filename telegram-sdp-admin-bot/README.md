@@ -8,8 +8,19 @@ Bot Telegram để quản trị nhanh ManageEngine ServiceDesk Plus on-prem qua 
 - `/assign <id> <technician_name>`
 - `/setstatus <id> <status_name>`
 - `/setpriority <id> <priority_name>`
+- `/setgroup <id> <support_group_name>`
 - `/addnote <id> <note text>`
 - `/close <id>` + `/confirm` (2 bước)
+
+### Danh mục tra cứu nhanh
+- `/technicians [N]` — danh sách technician
+- `/statuses` — danh sách status
+- `/priorities` — danh sách priority
+- `/sgroups [N]` — danh sách support group
+
+### Quản lý support group
+- `/sgcreate <name> [| description]` + `/confirm`
+- `/sgupdate <group_id> <new_name> [| description]` + `/confirm`
 - `/cancel`
 
 ## Cài đặt
@@ -42,4 +53,4 @@ python bot.py
 ## Security
 - Bắt buộc set `ADMIN_USER_IDS` trong production.
 - Dùng API key riêng cho bot, phân quyền tối thiểu.
-- Lệnh đóng ticket đã có xác nhận 2 bước.
+- Lệnh đóng ticket + create/update support group đã có xác nhận 2 bước.

@@ -2,7 +2,6 @@ import json
 import os
 import time
 from datetime import datetime
-from urllib.parse import quote_plus
 
 import requests
 from dotenv import load_dotenv
@@ -108,34 +107,41 @@ def _sdp_post(path: str, input_data: dict) -> dict:
     return data
 
 
-def _extract_requests(data: dict) -> list[dict]:
-    # Supports multiple response layouts across SDP builds.
+def _extract_list(data: dict, key: str) -> list[dict]:
     if not isinstance(data, dict):
         return []
-    if "requests" in data and isinstance(data["requests"], list):
-        return data["requests"]
+    if key in data and isinstance(data[key], list):
+        return data[key]
     resp = data.get("response", {}) if isinstance(data.get("response"), dict) else {}
-    if "requests" in resp and isinstance(resp["requests"], list):
-        return resp["requests"]
+    if key in resp and isinstance(resp[key], list):
+        return resp[key]
     return []
 
 
-def _extract_request(data: dict) -> dict | None:
+def _extract_one(data: dict, key: str) -> dict | None:
     if not isinstance(data, dict):
         return None
-    if "request" in data and isinstance(data["request"], dict):
-        return data["request"]
+    if key in data and isinstance(data[key], dict):
+        return data[key]
     resp = data.get("response", {}) if isinstance(data.get("response"), dict) else {}
-    if "request" in resp and isinstance(resp["request"], dict):
-        return resp["request"]
+    if key in resp and isinstance(resp[key], dict):
+        return resp[key]
     return None
+
+
+def _extract_requests(data: dict) -> list[dict]:
+    return _extract_list(data, "requests")
+
+
+def _extract_request(data: dict) -> dict | None:
+    return _extract_one(data, "request")
 
 
 def _fmt_dt(ms_or_ts) -> str:
     try:
         s = str(ms_or_ts)
         iv = int(s)
-        if iv > 10_000_000_000:  # likely ms
+        if iv > 10_000_000_000:
             iv //= 1000
         return datetime.fromtimestamp(iv).strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
@@ -152,7 +158,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/assign <id> <technician_name> - assign request\n"
         "/setstatus <id> <status_name> - update status\n"
         "/setpriority <id> <priority_name> - update priority\n"
+        "/setgroup <id> <support_group_name> - update support group\n"
         "/addnote <id> <note text> - add note\n"
+        "/technicians [N] - list technicians\n"
+        "/statuses - list status names\n"
+        "/priorities - list priority names\n"
+        "/sgroups [N] - list support groups\n"
+        "/sgcreate <name> [| description] - create support group (/confirm)\n"
+        "/sgupdate <group_id> <new_name> [| description] - update support group (/confirm)\n"
         "/close <id> - close request (requires /confirm)\n"
         "/confirm - confirm pending dangerous action\n"
         "/cancel - cancel pending action\n"
@@ -176,14 +189,11 @@ async def requests_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         limit = max(1, min(int(context.args[0]), 50))
 
     try:
-        # Build criteria: not closed/cancelled; SDP query syntax may vary by build,
-        # but this payload works on most v3 APIs.
         list_info = {"row_count": limit, "start_index": 1, "sort_field": "created_time", "sort_order": "desc"}
         input_data = {
             "list_info": list_info,
-            "fields_required": ["id", "subject", "status", "priority", "requester", "technician", "created_time"],
+            "fields_required": ["id", "subject", "status", "priority", "requester", "technician", "group", "created_time"],
         }
-
         data = _sdp_get("/api/v3/requests", params={"input_data": json.dumps(input_data, ensure_ascii=False)})
         reqs = _extract_requests(data)
 
@@ -198,7 +208,8 @@ async def requests_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
             st = (r.get("status") or {}).get("name", "?") if isinstance(r.get("status"), dict) else str(r.get("status", "?"))
             pr = (r.get("priority") or {}).get("name", "?") if isinstance(r.get("priority"), dict) else str(r.get("priority", "?"))
             tech = (r.get("technician") or {}).get("name", "-") if isinstance(r.get("technician"), dict) else "-"
-            lines.append(f"{i}) #{rid} | {st} | {pr} | {tech}\n   {subj}")
+            grp = (r.get("group") or {}).get("name", "-") if isinstance(r.get("group"), dict) else "-"
+            lines.append(f"{i}) #{rid} | {st} | {pr} | {tech} | grp:{grp}\n   {subj}")
 
         await update.message.reply_text("\n".join(lines))
     except Exception as e:
@@ -227,6 +238,7 @@ async def request_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pr = (r.get("priority") or {}).get("name", "?") if isinstance(r.get("priority"), dict) else str(r.get("priority", "?"))
         tech = (r.get("technician") or {}).get("name", "-") if isinstance(r.get("technician"), dict) else "-"
         reqr = (r.get("requester") or {}).get("name", "-") if isinstance(r.get("requester"), dict) else "-"
+        grp = (r.get("group") or {}).get("name", "-") if isinstance(r.get("group"), dict) else "-"
         created = _fmt_dt((r.get("created_time") or {}).get("value") if isinstance(r.get("created_time"), dict) else r.get("created_time"))
 
         msg = (
@@ -234,6 +246,7 @@ async def request_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Subject: {r.get('subject', '(no subject)')}\n"
             f"Status: {st}\n"
             f"Priority: {pr}\n"
+            f"Support Group: {grp}\n"
             f"Requester: {reqr}\n"
             f"Technician: {tech}\n"
             f"Created: {created}"
@@ -257,10 +270,7 @@ async def assign(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tech_name = " ".join(context.args[1:]).strip()
 
     try:
-        data = _sdp_post(
-            f"/api/v3/requests/{rid}",
-            {"request": {"technician": {"name": tech_name}}},
-        )
+        _sdp_post(f"/api/v3/requests/{rid}", {"request": {"technician": {"name": tech_name}}})
         await update.message.reply_text(f"✅ Assigned request #{rid} -> {tech_name}")
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {e}")
@@ -280,10 +290,7 @@ async def setstatus(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_name = " ".join(context.args[1:]).strip()
 
     try:
-        _sdp_post(
-            f"/api/v3/requests/{rid}",
-            {"request": {"status": {"name": status_name}}},
-        )
+        _sdp_post(f"/api/v3/requests/{rid}", {"request": {"status": {"name": status_name}}})
         await update.message.reply_text(f"✅ Updated status for #{rid} -> {status_name}")
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {e}")
@@ -303,11 +310,28 @@ async def setpriority(update: Update, context: ContextTypes.DEFAULT_TYPE):
     priority_name = " ".join(context.args[1:]).strip()
 
     try:
-        _sdp_post(
-            f"/api/v3/requests/{rid}",
-            {"request": {"priority": {"name": priority_name}}},
-        )
+        _sdp_post(f"/api/v3/requests/{rid}", {"request": {"priority": {"name": priority_name}}})
         await update.message.reply_text(f"✅ Updated priority for #{rid} -> {priority_name}")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+
+async def setgroup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not _allowed(user_id):
+        await update.message.reply_text("⛔ Not authorized.")
+        return
+
+    if len(context.args) < 2 or not context.args[0].isdigit():
+        await update.message.reply_text("Usage: /setgroup <id> <support_group_name>")
+        return
+
+    rid = context.args[0]
+    group_name = " ".join(context.args[1:]).strip()
+
+    try:
+        _sdp_post(f"/api/v3/requests/{rid}", {"request": {"group": {"name": group_name}}})
+        await update.message.reply_text(f"✅ Updated support group for #{rid} -> {group_name}")
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {e}")
 
@@ -326,13 +350,164 @@ async def addnote(update: Update, context: ContextTypes.DEFAULT_TYPE):
     note_text = " ".join(context.args[1:]).strip()
 
     try:
-        _sdp_post(
-            f"/api/v3/requests/{rid}/notes",
-            {"note": {"description": note_text, "show_to_requester": False}},
-        )
+        _sdp_post(f"/api/v3/requests/{rid}/notes", {"note": {"description": note_text, "show_to_requester": False}})
         await update.message.reply_text(f"✅ Added note to request #{rid}")
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {e}")
+
+
+async def technicians(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not _allowed(user_id):
+        await update.message.reply_text("⛔ Not authorized.")
+        return
+
+    limit = DEFAULT_LIMIT
+    if context.args and context.args[0].isdigit():
+        limit = max(1, min(int(context.args[0]), 100))
+
+    try:
+        input_data = {"list_info": {"row_count": limit, "start_index": 1, "sort_field": "name", "sort_order": "asc"}}
+        data = _sdp_get("/api/v3/technicians", params={"input_data": json.dumps(input_data, ensure_ascii=False)})
+        rows = _extract_list(data, "technicians")
+        if not rows:
+            await update.message.reply_text("No technicians found.")
+            return
+
+        lines = [f"👨‍💻 Technicians (top {limit})", ""]
+        for i, t in enumerate(rows, 1):
+            tid = t.get("id", "?")
+            name = t.get("name") or t.get("first_name", "(unknown)")
+            email = t.get("email_id", "-")
+            lines.append(f"{i}) #{tid} | {name} | {email}")
+        await update.message.reply_text("\n".join(lines))
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+
+async def statuses(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not _allowed(user_id):
+        await update.message.reply_text("⛔ Not authorized.")
+        return
+
+    try:
+        data = _sdp_get("/api/v3/request_statuses")
+        rows = _extract_list(data, "request_statuses") or _extract_list(data, "statuses")
+        if not rows:
+            await update.message.reply_text("No statuses found.")
+            return
+
+        lines = ["📌 Statuses", ""]
+        for i, s in enumerate(rows, 1):
+            sid = s.get("id", "?")
+            name = s.get("name", "?")
+            lines.append(f"{i}) #{sid} | {name}")
+        await update.message.reply_text("\n".join(lines))
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+
+async def priorities(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not _allowed(user_id):
+        await update.message.reply_text("⛔ Not authorized.")
+        return
+
+    try:
+        data = _sdp_get("/api/v3/priorities")
+        rows = _extract_list(data, "priorities")
+        if not rows:
+            await update.message.reply_text("No priorities found.")
+            return
+
+        lines = ["⚡ Priorities", ""]
+        for i, p in enumerate(rows, 1):
+            pid = p.get("id", "?")
+            name = p.get("name", "?")
+            lines.append(f"{i}) #{pid} | {name}")
+        await update.message.reply_text("\n".join(lines))
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+
+async def sgroups(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not _allowed(user_id):
+        await update.message.reply_text("⛔ Not authorized.")
+        return
+
+    limit = DEFAULT_LIMIT
+    if context.args and context.args[0].isdigit():
+        limit = max(1, min(int(context.args[0]), 100))
+
+    try:
+        input_data = {"list_info": {"row_count": limit, "start_index": 1, "sort_field": "name", "sort_order": "asc"}}
+        data = _sdp_get("/api/v3/support_groups", params={"input_data": json.dumps(input_data, ensure_ascii=False)})
+        rows = _extract_list(data, "support_groups")
+        if not rows:
+            await update.message.reply_text("No support groups found.")
+            return
+
+        lines = [f"👥 Support Groups (top {limit})", ""]
+        for i, g in enumerate(rows, 1):
+            gid = g.get("id", "?")
+            name = g.get("name", "?")
+            lines.append(f"{i}) #{gid} | {name}")
+        await update.message.reply_text("\n".join(lines))
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+
+async def sgcreate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    if not _allowed(user_id):
+        await update.message.reply_text("⛔ Not authorized.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("Usage: /sgcreate <name> [| description]")
+        return
+
+    raw = " ".join(context.args)
+    parts = [x.strip() for x in raw.split("|", 1)]
+    name = parts[0]
+    desc = parts[1] if len(parts) > 1 else ""
+    if not name:
+        await update.message.reply_text("Support group name cannot be empty.")
+        return
+
+    _set_pending(chat_id, user_id, "sgcreate", {"name": name, "description": desc})
+    await update.message.reply_text(
+        f"⚠️ Confirm create support group: {name}\nUse /confirm within {CONFIRM_TIMEOUT_SEC}s or /cancel"
+    )
+
+
+async def sgupdate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    if not _allowed(user_id):
+        await update.message.reply_text("⛔ Not authorized.")
+        return
+
+    if len(context.args) < 2 or not context.args[0].isdigit():
+        await update.message.reply_text("Usage: /sgupdate <group_id> <new_name> [| description]")
+        return
+
+    gid = context.args[0]
+    raw = " ".join(context.args[1:])
+    parts = [x.strip() for x in raw.split("|", 1)]
+    name = parts[0]
+    desc = parts[1] if len(parts) > 1 else ""
+    if not name:
+        await update.message.reply_text("New support group name cannot be empty.")
+        return
+
+    _set_pending(chat_id, user_id, "sgupdate", {"id": gid, "name": name, "description": desc})
+    await update.message.reply_text(
+        f"⚠️ Confirm update support group #{gid} -> {name}\nUse /confirm within {CONFIRM_TIMEOUT_SEC}s or /cancel"
+    )
 
 
 async def close_req(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -348,10 +523,7 @@ async def close_req(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     rid = context.args[0]
     _set_pending(chat_id, user_id, "close", {"id": rid})
-    await update.message.reply_text(
-        f"⚠️ Confirm close request #{rid}\n"
-        f"Use /confirm within {CONFIRM_TIMEOUT_SEC}s or /cancel"
-    )
+    await update.message.reply_text(f"⚠️ Confirm close request #{rid}\nUse /confirm within {CONFIRM_TIMEOUT_SEC}s or /cancel")
 
 
 async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -371,11 +543,18 @@ async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         payload = x.get("payload", {})
         if action == "close":
             rid = payload.get("id")
-            _sdp_post(
-                f"/api/v3/requests/{rid}/close",
-                {"request": {"closure_info": {"requester_ack_resolution": True}}},
-            )
+            _sdp_post(f"/api/v3/requests/{rid}/close", {"request": {"closure_info": {"requester_ack_resolution": True}}})
             await update.message.reply_text(f"✅ Closed request #{rid}")
+        elif action == "sgcreate":
+            _sdp_post("/api/v3/support_groups", {"support_group": {"name": payload.get("name"), "description": payload.get("description", "")}})
+            await update.message.reply_text(f"✅ Created support group: {payload.get('name')}")
+        elif action == "sgupdate":
+            gid = payload.get("id")
+            _sdp_post(
+                f"/api/v3/support_groups/{gid}",
+                {"support_group": {"name": payload.get("name"), "description": payload.get("description", "")}},
+            )
+            await update.message.reply_text(f"✅ Updated support group #{gid} -> {payload.get('name')}")
         else:
             await update.message.reply_text("Unknown pending action.")
     except Exception as e:
@@ -408,7 +587,14 @@ def main():
     app.add_handler(CommandHandler("assign", assign))
     app.add_handler(CommandHandler("setstatus", setstatus))
     app.add_handler(CommandHandler("setpriority", setpriority))
+    app.add_handler(CommandHandler("setgroup", setgroup))
     app.add_handler(CommandHandler("addnote", addnote))
+    app.add_handler(CommandHandler("technicians", technicians))
+    app.add_handler(CommandHandler("statuses", statuses))
+    app.add_handler(CommandHandler("priorities", priorities))
+    app.add_handler(CommandHandler("sgroups", sgroups))
+    app.add_handler(CommandHandler("sgcreate", sgcreate))
+    app.add_handler(CommandHandler("sgupdate", sgupdate))
     app.add_handler(CommandHandler("close", close_req))
     app.add_handler(CommandHandler("confirm", confirm))
     app.add_handler(CommandHandler("cancel", cancel))
