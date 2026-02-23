@@ -14,15 +14,19 @@ Bot Telegram để quản trị nhanh ManageEngine ServiceDesk Plus on-prem qua 
 
 ## Lookup
 - `/sites [N]` — list site + site_id
-- `/technicians [N]`
+- `/technicians [N]` (hiển thị cả `login_name` để dùng cho sgcreate/sgupdate)
 - `/statuses`
 - `/priorities`
 - `/sgroups [N] [site_id]` — list support groups, có filter theo site
 
-## Quản lý support group (site-aware)
-- `/sgcreate <site_id> <name> [| description]` + `/confirm`
-- `/sgupdate <group_id> <site_id> <new_name> [| description]` + `/confirm`
+## Quản lý support group (site-aware, bắt buộc có technician)
+- `/sgcreate <site_id> <name> | <techaccount1,techaccount2> [| description]` + `/confirm`
+- `/sgupdate <group_id> <site_id> <new_name> | <techaccount1,techaccount2> [| description]` + `/confirm`
 - `/cancel`
+
+Ví dụ:
+- `/sgcreate 2 NOC Team | thuongdv2,anhnv | Team trực NOC`
+- `/sgupdate 15 2 NOC Team L2 | thuongdv2`
 
 ## Cài đặt
 ```bash

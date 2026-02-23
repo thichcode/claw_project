@@ -146,13 +146,53 @@ def _find_support_group_by_name_and_site(group_name: str, site_id: str | None) -
     rows = _extract_list(data, "support_groups")
     for g in rows:
         name = (g.get("name") or "").strip().lower()
-        gid = g.get("id")
         site = g.get("site") if isinstance(g.get("site"), dict) else {}
         g_site_id = str(site.get("id")) if site.get("id") is not None else None
         if name == group_name.strip().lower():
             if site_id is None or g_site_id == str(site_id):
                 return g
     return None
+
+
+def _get_all_technicians(limit: int = 500) -> list[dict]:
+    input_data = {"list_info": {"row_count": limit, "start_index": 1, "sort_field": "name", "sort_order": "asc"}}
+    return _extract_list(_sdp_get("/api/v3/technicians", params={"input_data": json.dumps(input_data, ensure_ascii=False)}), "technicians")
+
+
+def _resolve_techaccounts(identifiers: list[str]) -> tuple[list[dict], list[str]]:
+    """
+    Resolve technician accounts by login_name first, then name.
+    Returns: (technician_refs_for_payload, unresolved_identifiers)
+    """
+    techs = _get_all_technicians()
+    by_login = {}
+    by_name = {}
+    for t in techs:
+        login = str(t.get("login_name") or "").strip().lower()
+        name = str(t.get("name") or t.get("first_name") or "").strip().lower()
+        if login:
+            by_login[login] = t
+        if name:
+            by_name[name] = t
+
+    resolved = []
+    missing = []
+    seen_ids = set()
+    for raw in identifiers:
+        k = raw.strip().lower()
+        if not k:
+            continue
+        t = by_login.get(k) or by_name.get(k)
+        if not t:
+            missing.append(raw)
+            continue
+        tid = t.get("id")
+        if tid is None or str(tid) in seen_ids:
+            continue
+        seen_ids.add(str(tid))
+        resolved.append({"id": str(tid), "name": t.get("name") or t.get("first_name") or raw})
+
+    return resolved, missing
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -166,8 +206,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Lookup:\n"
         "/sites [N], /technicians [N], /statuses, /priorities, /sgroups [N] [site_id]\n\n"
         "Support Group admin (site-aware):\n"
-        "/sgcreate <site_id> <name> [| description] (/confirm)\n"
-        "/sgupdate <group_id> <site_id> <new_name> [| description] (/confirm)\n"
+        "/sgcreate <site_id> <name> | <techaccount1,techaccount2> [| description] (/confirm)\n"
+        "/sgupdate <group_id> <site_id> <new_name> | <techaccount1,techaccount2> [| description] (/confirm)\n"
         "/confirm, /cancel, /ping\n\n"
         f"Your Telegram user id: {u.id}"
     )
@@ -364,7 +404,10 @@ async def technicians(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         lines = [f"👨‍💻 Technicians (top {limit})", ""]
         for i, t in enumerate(rows, 1):
-            lines.append(f"{i}) #{t.get('id', '?')} | {t.get('name') or t.get('first_name', '(unknown)')} | {t.get('email_id', '-')}")
+            login = t.get("login_name", "-")
+            lines.append(
+                f"{i}) #{t.get('id', '?')} | {t.get('name') or t.get('first_name', '(unknown)')} | login:{login} | {t.get('email_id', '-')}"
+            )
         await update.message.reply_text("\n".join(lines))
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {e}")
@@ -447,20 +490,52 @@ async def sgcreate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if len(context.args) < 2 or not context.args[0].isdigit():
-        await update.message.reply_text("Usage: /sgcreate <site_id> <name> [| description]")
+        await update.message.reply_text("Usage: /sgcreate <site_id> <name> | <techaccount1,techaccount2> [| description]")
         return
 
     site_id = context.args[0]
     raw = " ".join(context.args[1:])
-    parts = [x.strip() for x in raw.split("|", 1)]
+    parts = [x.strip() for x in raw.split("|")]
+    if len(parts) < 2:
+        await update.message.reply_text("Thiếu techaccount. Ví dụ: /sgcreate 2 NOC Team | thuongdv2,anhnv")
+        return
+
     name = parts[0]
-    desc = parts[1] if len(parts) > 1 else ""
+    tech_csv = parts[1]
+    desc = parts[2] if len(parts) > 2 else ""
+
     if not name:
         await update.message.reply_text("Support group name cannot be empty.")
         return
 
-    _set_pending(update.effective_chat.id, update.effective_user.id, "sgcreate", {"site_id": site_id, "name": name, "description": desc})
-    await update.message.reply_text(f"⚠️ Confirm create support group '{name}' on site_id={site_id}\nUse /confirm within {CONFIRM_TIMEOUT_SEC}s or /cancel")
+    tech_keys = [x.strip() for x in tech_csv.split(",") if x.strip()]
+    if not tech_keys:
+        await update.message.reply_text("Phải có ít nhất 1 techaccount.")
+        return
+
+    try:
+        tech_refs, missing = _resolve_techaccounts(tech_keys)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error khi resolve technician: {e}")
+        return
+
+    if missing:
+        await update.message.reply_text(f"Không tìm thấy techaccount: {', '.join(missing)}")
+        return
+    if not tech_refs:
+        await update.message.reply_text("Không resolve được technician hợp lệ.")
+        return
+
+    _set_pending(
+        update.effective_chat.id,
+        update.effective_user.id,
+        "sgcreate",
+        {"site_id": site_id, "name": name, "description": desc, "technicians": tech_refs},
+    )
+    await update.message.reply_text(
+        f"⚠️ Confirm create support group '{name}' on site_id={site_id} with {len(tech_refs)} technician(s)\n"
+        f"Use /confirm within {CONFIRM_TIMEOUT_SEC}s or /cancel"
+    )
 
 
 async def sgupdate(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -469,20 +544,51 @@ async def sgupdate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if len(context.args) < 3 or not context.args[0].isdigit() or not context.args[1].isdigit():
-        await update.message.reply_text("Usage: /sgupdate <group_id> <site_id> <new_name> [| description]")
+        await update.message.reply_text("Usage: /sgupdate <group_id> <site_id> <new_name> | <techaccount1,techaccount2> [| description]")
         return
 
     gid, site_id = context.args[0], context.args[1]
     raw = " ".join(context.args[2:])
-    parts = [x.strip() for x in raw.split("|", 1)]
+    parts = [x.strip() for x in raw.split("|")]
+    if len(parts) < 2:
+        await update.message.reply_text("Thiếu techaccount. Ví dụ: /sgupdate 12 2 NOC Team | thuongdv2")
+        return
+
     name = parts[0]
-    desc = parts[1] if len(parts) > 1 else ""
+    tech_csv = parts[1]
+    desc = parts[2] if len(parts) > 2 else ""
     if not name:
         await update.message.reply_text("New support group name cannot be empty.")
         return
 
-    _set_pending(update.effective_chat.id, update.effective_user.id, "sgupdate", {"id": gid, "site_id": site_id, "name": name, "description": desc})
-    await update.message.reply_text(f"⚠️ Confirm update support group #{gid} on site_id={site_id} -> {name}\nUse /confirm within {CONFIRM_TIMEOUT_SEC}s or /cancel")
+    tech_keys = [x.strip() for x in tech_csv.split(",") if x.strip()]
+    if not tech_keys:
+        await update.message.reply_text("Phải có ít nhất 1 techaccount.")
+        return
+
+    try:
+        tech_refs, missing = _resolve_techaccounts(tech_keys)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error khi resolve technician: {e}")
+        return
+
+    if missing:
+        await update.message.reply_text(f"Không tìm thấy techaccount: {', '.join(missing)}")
+        return
+    if not tech_refs:
+        await update.message.reply_text("Không resolve được technician hợp lệ.")
+        return
+
+    _set_pending(
+        update.effective_chat.id,
+        update.effective_user.id,
+        "sgupdate",
+        {"id": gid, "site_id": site_id, "name": name, "description": desc, "technicians": tech_refs},
+    )
+    await update.message.reply_text(
+        f"⚠️ Confirm update support group #{gid} on site_id={site_id} -> {name} with {len(tech_refs)} technician(s)\n"
+        f"Use /confirm within {CONFIRM_TIMEOUT_SEC}s or /cancel"
+    )
 
 
 async def close_req(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -516,15 +622,33 @@ async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif action == "sgcreate":
             _sdp_post(
                 "/api/v3/support_groups",
-                {"support_group": {"name": payload.get("name"), "description": payload.get("description", ""), "site": {"id": payload.get("site_id")}}},
+                {
+                    "support_group": {
+                        "name": payload.get("name"),
+                        "description": payload.get("description", ""),
+                        "site": {"id": payload.get("site_id")},
+                        "technicians": payload.get("technicians", []),
+                    }
+                },
             )
-            await update.message.reply_text(f"✅ Created support group '{payload.get('name')}' on site_id={payload.get('site_id')}")
+            await update.message.reply_text(
+                f"✅ Created support group '{payload.get('name')}' on site_id={payload.get('site_id')} with {len(payload.get('technicians', []))} technician(s)"
+            )
         elif action == "sgupdate":
             _sdp_post(
                 f"/api/v3/support_groups/{payload.get('id')}",
-                {"support_group": {"name": payload.get("name"), "description": payload.get("description", ""), "site": {"id": payload.get("site_id")}}},
+                {
+                    "support_group": {
+                        "name": payload.get("name"),
+                        "description": payload.get("description", ""),
+                        "site": {"id": payload.get("site_id")},
+                        "technicians": payload.get("technicians", []),
+                    }
+                },
             )
-            await update.message.reply_text(f"✅ Updated support group #{payload.get('id')} -> {payload.get('name')} (site_id={payload.get('site_id')})")
+            await update.message.reply_text(
+                f"✅ Updated support group #{payload.get('id')} -> {payload.get('name')} (site_id={payload.get('site_id')}) with {len(payload.get('technicians', []))} technician(s)"
+            )
         else:
             await update.message.reply_text("Unknown pending action.")
     except Exception as e:
