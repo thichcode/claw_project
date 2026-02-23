@@ -11,6 +11,7 @@ _Learn about the person you're helping. Update this as you go._
   Asia/Saigon
 - **Notes:**
   - Never delete files without confirming
+  - Ask before any external actions
 
 ## Context
 
