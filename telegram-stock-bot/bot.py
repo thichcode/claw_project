@@ -1,4 +1,5 @@
 import json
+import math
 import os
 from datetime import datetime, time
 from pathlib import Path
@@ -15,8 +16,11 @@ load_dotenv()
 
 DEFAULT_WATCHLIST = ["FPT", "CTG", "HPG", "VCB", "TCB", "MBB", "SSI", "VND", "MWG", "PNJ"]
 CHAT_STORE = Path(__file__).parent / "chat_ids.json"
+RISK_STORE = Path(__file__).parent / "risk_profiles.json"
+ALERT_STATE_STORE = Path(__file__).parent / "alerts_state.json"
 
 
+# ---------- Config helpers ----------
 def _get_watchlist() -> list[str]:
     raw = os.getenv("WATCHLIST", "").strip()
     if not raw:
@@ -32,21 +36,68 @@ def _parse_report_time(raw: str) -> time:
         return time(hour=22, minute=0)
 
 
-def _load_chat_ids() -> set[int]:
-    if not CHAT_STORE.exists():
-        return set()
+def _safe_float(v: str, fallback: float) -> float:
     try:
-        data = json.loads(CHAT_STORE.read_text(encoding="utf-8"))
-        return set(int(x) for x in data.get("chat_ids", []))
+        return float(v)
     except Exception:
-        return set()
+        return fallback
+
+
+# ---------- JSON stores ----------
+def _load_json(path: Path, default: dict) -> dict:
+    if not path.exists():
+        return default
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return default
+
+
+def _save_json(path: Path, payload: dict):
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _load_chat_ids() -> set[int]:
+    data = _load_json(CHAT_STORE, {"chat_ids": []})
+    return set(int(x) for x in data.get("chat_ids", []))
 
 
 def _save_chat_ids(chat_ids: set[int]):
-    payload = {"chat_ids": sorted(chat_ids)}
-    CHAT_STORE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    _save_json(CHAT_STORE, {"chat_ids": sorted(chat_ids)})
 
 
+def _load_risk_profiles() -> dict:
+    return _load_json(RISK_STORE, {"profiles": {}})
+
+
+def _save_risk_profiles(data: dict):
+    _save_json(RISK_STORE, data)
+
+
+def _get_risk_profile(chat_id: int) -> dict:
+    data = _load_risk_profiles()
+    prof = data.get("profiles", {}).get(str(chat_id), {})
+    capital = prof.get("capital_vnd", _safe_float(os.getenv("DEFAULT_CAPITAL_VND", "100000000"), 100_000_000))
+    risk_pct = prof.get("risk_pct", _safe_float(os.getenv("RISK_PER_TRADE_PCT", "1.0"), 1.0))
+    return {"capital_vnd": float(capital), "risk_pct": float(risk_pct)}
+
+
+def _set_risk_profile(chat_id: int, capital_vnd: float, risk_pct: float):
+    data = _load_risk_profiles()
+    profiles = data.setdefault("profiles", {})
+    profiles[str(chat_id)] = {"capital_vnd": float(capital_vnd), "risk_pct": float(risk_pct)}
+    _save_risk_profiles(data)
+
+
+def _load_alert_state() -> dict:
+    return _load_json(ALERT_STATE_STORE, {"last_alert_day": {}, "sent": {}})
+
+
+def _save_alert_state(data: dict):
+    _save_json(ALERT_STATE_STORE, data)
+
+
+# ---------- Indicators ----------
 def _ema(series: pd.Series, span: int) -> pd.Series:
     return series.ewm(span=span, adjust=False).mean()
 
@@ -82,12 +133,35 @@ def _atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) ->
     return tr.rolling(period).mean()
 
 
+# ---------- Market filter ----------
+def _market_regime() -> dict:
+    """
+    Filter by VN-Index trend. bullish when MA20 > MA50 and price > MA20.
+    """
+    try:
+        df = yf.download("^VNINDEX", period="8mo", interval="1d", progress=False, auto_adjust=True)
+        if df is None or df.empty or len(df) < 60:
+            return {"ok": True, "label": "NEUTRAL (không đủ dữ liệu VN-Index)", "score": 0}
+
+        close = df["Close"].dropna()
+        last = float(close.iloc[-1])
+        ma20 = float(close.rolling(20).mean().iloc[-1])
+        ma50 = float(close.rolling(50).mean().iloc[-1])
+
+        bullish = ma20 > ma50 and last > ma20
+        label = "BULLISH" if bullish else "CAUTION"
+        score = 1 if bullish else -1
+        return {"ok": bullish, "label": label, "score": score, "last": last, "ma20": ma20, "ma50": ma50}
+    except Exception:
+        return {"ok": True, "label": "NEUTRAL (lỗi dữ liệu VN-Index)", "score": 0}
+
+
+# ---------- Strategy core ----------
 def _trade_plan(last: float, ma20: float, atr14: float) -> dict:
     entry_low = min(last * 0.995, ma20 * 1.005)
     entry_high = max(last * 1.005, ma20 * 1.015)
     entry_mid = (entry_low + entry_high) / 2
 
-    # Stop-loss: bảo thủ, tối đa theo ATR hoặc 4% dưới entry_mid
     sl_by_atr = entry_mid - 1.2 * atr14
     sl_by_pct = entry_mid * 0.96
     sl = min(sl_by_atr, sl_by_pct)
@@ -99,9 +173,32 @@ def _trade_plan(last: float, ma20: float, atr14: float) -> dict:
     return {
         "entry_low": float(entry_low),
         "entry_high": float(entry_high),
+        "entry_mid": float(entry_mid),
         "sl": float(sl),
         "tp1": float(tp1),
         "tp2": float(tp2),
+    }
+
+
+def _position_size(plan: dict, capital_vnd: float, risk_pct: float) -> dict:
+    risk_budget = capital_vnd * (risk_pct / 100.0)
+    per_share_risk = max(plan["entry_mid"] - plan["sl"], plan["entry_mid"] * 0.005)
+    qty = max(int(risk_budget // per_share_risk), 0)
+
+    lot_qty = (qty // 100) * 100
+    if lot_qty == 0 and qty > 0:
+        lot_qty = 100
+
+    est_value = lot_qty * plan["entry_mid"]
+    if est_value > capital_vnd and plan["entry_mid"] > 0:
+        lot_qty = int(capital_vnd // plan["entry_mid"])
+        lot_qty = (lot_qty // 100) * 100
+        est_value = lot_qty * plan["entry_mid"]
+
+    return {
+        "risk_budget": float(risk_budget),
+        "qty": int(max(lot_qty, 0)),
+        "est_value": float(max(est_value, 0)),
     }
 
 
@@ -136,12 +233,10 @@ def _fetch_score(symbol: str) -> dict | None:
         if np.isnan(atr14) or atr14 <= 0:
             atr14 = last * 0.02
 
-        # Weighted score
         trend_score = 1.0 if ma20 > ma50 else 0.0
         momentum_score = max(min(ret5 / 5.0, 2.0), -2.0)
         liquidity_score = max(min((vol_ratio - 1.0), 2.0), -1.0)
 
-        # RSI score: ưu tiên vùng 45-65 (vừa tăng vừa chưa quá nóng)
         if 45 <= rsi14 <= 65:
             rsi_score = 1.0
         elif 35 <= rsi14 < 45 or 65 < rsi14 <= 72:
@@ -151,14 +246,7 @@ def _fetch_score(symbol: str) -> dict | None:
 
         macd_score = 1.0 if macd_bull else 0.0
 
-        score = (
-            40
-            + trend_score * 18
-            + momentum_score * 14
-            + liquidity_score * 12
-            + rsi_score * 8
-            + macd_score * 8
-        )
+        score = 40 + trend_score * 18 + momentum_score * 14 + liquidity_score * 12 + rsi_score * 8 + macd_score * 8
 
         plan = _trade_plan(float(last), float(ma20), float(atr14))
 
@@ -188,24 +276,36 @@ def pick_top3() -> list[dict]:
     return candidates[:3]
 
 
-def render_top3() -> str:
+def render_top3(chat_id: int | None = None) -> str:
+    market = _market_regime()
     picks = pick_top3()
     if not picks:
-        return "Không lấy được dữ liệu. Kiểm tra mạng hoặc danh sách mã (WATCHLIST)."
+        return "Không lấy được dữ liệu. Kiểm tra mạng hoặc WATCHLIST."
+
+    risk_prof = _get_risk_profile(chat_id) if chat_id is not None else {
+        "capital_vnd": _safe_float(os.getenv("DEFAULT_CAPITAL_VND", "100000000"), 100_000_000),
+        "risk_pct": _safe_float(os.getenv("RISK_PER_TRADE_PCT", "1.0"), 1.0),
+    }
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
-    lines = [f"📊 Top 3 mã ưu tiên (auto) - {now}", ""]
+    lines = [f"📊 Top 3 mã ưu tiên (V2) - {now}"]
+    lines.append(f"🌐 Market filter (VN-Index): {market.get('label')}" + (" ✅" if market.get("ok") else " ⚠️"))
+    lines.append("")
 
     for i, p in enumerate(picks, 1):
         trend = "✅" if p["trend_up"] else "⚠️"
         macd = "✅" if p["macd_bull"] else "⚠️"
         plan = p["plan"]
+        pos = _position_size(plan, risk_prof["capital_vnd"], risk_prof["risk_pct"])
 
         lines.append(
             f"{i}) {p['symbol']} | Giá: {p['price']:.2f} | 5d: {p['ret5']:+.2f}% | KL: x{p['vol_ratio']:.2f} | Trend: {trend} | RSI14: {p['rsi14']:.1f} | MACD: {macd} | Score: {p['score']:.1f}"
         )
         lines.append(
-            f"   • Vùng mua: {plan['entry_low']:.2f} - {plan['entry_high']:.2f} | Cắt lỗ: {plan['sl']:.2f} | TP1: {plan['tp1']:.2f} | TP2: {plan['tp2']:.2f}"
+            f"   • Vùng mua: {plan['entry_low']:.2f}-{plan['entry_high']:.2f} | SL: {plan['sl']:.2f} | TP1: {plan['tp1']:.2f} | TP2: {plan['tp2']:.2f}"
+        )
+        lines.append(
+            f"   • Gợi ý khối lượng: ~{pos['qty']} cp (risk {risk_prof['risk_pct']:.2f}% ~ {pos['risk_budget']:,.0f} VND) | Giá trị ước tính: {pos['est_value']:,.0f} VND"
         )
 
     lines += [
@@ -216,6 +316,80 @@ def render_top3() -> str:
     return "\n".join(lines)
 
 
+# ---------- Intraday alerts ----------
+def _is_market_time(now: datetime) -> bool:
+    # Vietnam market sessions: ~09:15-11:30 and 13:00-14:45, Mon-Fri
+    if now.weekday() >= 5:
+        return False
+
+    hm = now.hour * 60 + now.minute
+    morning = 9 * 60 + 15 <= hm <= 11 * 60 + 30
+    afternoon = 13 * 60 <= hm <= 14 * 60 + 45
+    return morning or afternoon
+
+
+def _today_key(now: datetime) -> str:
+    return now.strftime("%Y-%m-%d")
+
+
+async def intraday_alert_job(context: ContextTypes.DEFAULT_TYPE):
+    enabled = os.getenv("INTRADAY_ALERT_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    if not enabled:
+        return
+
+    tz_name = os.getenv("BOT_TIMEZONE", "Asia/Saigon")
+    now = datetime.now(ZoneInfo(tz_name))
+    if not _is_market_time(now):
+        return
+
+    market = _market_regime()
+    if not market.get("ok"):
+        return
+
+    picks = pick_top3()
+    if not picks:
+        return
+
+    state = _load_alert_state()
+    day_key = _today_key(now)
+    sent = state.setdefault("sent", {})
+    today_sent = set(sent.get(day_key, []))
+
+    to_alert = []
+    for p in picks:
+        plan = p["plan"]
+        if plan["entry_low"] <= p["price"] <= plan["entry_high"]:
+            if p["symbol"] not in today_sent:
+                to_alert.append(p)
+
+    if not to_alert:
+        return
+
+    chat_ids = _load_chat_ids()
+    if not chat_ids:
+        return
+
+    for p in to_alert:
+        for chat_id in chat_ids:
+            try:
+                msg = (
+                    f"🚨 Intraday alert: {p['symbol']} vào vùng mua\n"
+                    f"Giá hiện tại: {p['price']:.2f}\n"
+                    f"Vùng mua: {p['plan']['entry_low']:.2f}-{p['plan']['entry_high']:.2f}\n"
+                    f"SL: {p['plan']['sl']:.2f} | TP1: {p['plan']['tp1']:.2f} | TP2: {p['plan']['tp2']:.2f}"
+                )
+                await context.bot.send_message(chat_id=chat_id, text=msg)
+            except Exception:
+                continue
+
+        today_sent.add(p["symbol"])
+
+    sent[day_key] = sorted(today_sent)
+    state["sent"] = sent
+    _save_alert_state(state)
+
+
+# ---------- Commands ----------
 async def _register_chat(chat_id: int):
     chat_ids = _load_chat_ids()
     if chat_id not in chat_ids:
@@ -228,11 +402,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _register_chat(chat_id)
 
     await update.message.reply_text(
-        "Xin chào, mình là bot phân tích cổ phiếu VN.\n"
+        "Xin chào, mình là bot phân tích cổ phiếu VN (V2).\n"
         "Lệnh:\n"
-        "/top3 - Lấy Top 3 mã ưu tiên cho phiên kế tiếp\n"
+        "/top3 - Top 3 mã ưu tiên + vùng mua/SL/TP + khối lượng\n"
         "/watchlist - Xem danh sách mã đang quét\n"
-        "/reporttime - Xem giờ gửi báo cáo tự động"
+        "/reporttime - Xem giờ gửi báo cáo tự động\n"
+        "/risk <von_vnd> <risk_pct> - Cài quản lý vốn, vd: /risk 100000000 1\n"
+        "/myrisk - Xem cấu hình vốn/rủi ro hiện tại"
     )
 
 
@@ -240,8 +416,8 @@ async def top3(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     await _register_chat(chat_id)
 
-    await update.message.reply_text("Đang phân tích nhanh, chờ mình 3-8 giây...")
-    msg = render_top3()
+    await update.message.reply_text("Đang phân tích nhanh V2, chờ mình 3-8 giây...")
+    msg = render_top3(chat_id=chat_id)
     await update.message.reply_text(msg)
 
 
@@ -253,17 +429,51 @@ async def watchlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def reporttime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tz_name = os.getenv("BOT_TIMEZONE", "Asia/Saigon")
     report_time = os.getenv("DAILY_REPORT_TIME", "22:00")
-    await update.message.reply_text(f"Báo cáo tự động: mỗi ngày lúc {report_time} ({tz_name})")
+    interval = os.getenv("INTRADAY_CHECK_MINUTES", "10")
+    await update.message.reply_text(
+        f"Báo cáo tự động: mỗi ngày lúc {report_time} ({tz_name})\n"
+        f"Intraday check: mỗi {interval} phút trong giờ giao dịch"
+    )
+
+
+async def risk(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+
+    if len(context.args) < 2:
+        await update.message.reply_text("Cú pháp: /risk <von_vnd> <risk_pct>\nVí dụ: /risk 100000000 1")
+        return
+
+    try:
+        capital = float(context.args[0])
+        risk_pct = float(context.args[1])
+        if capital <= 0 or not (0.1 <= risk_pct <= 5.0):
+            raise ValueError
+    except Exception:
+        await update.message.reply_text("Giá trị không hợp lệ. risk_pct nên trong khoảng 0.1 - 5.0")
+        return
+
+    _set_risk_profile(chat_id, capital, risk_pct)
+    await update.message.reply_text(
+        f"Đã lưu quản lý vốn:\n- Vốn: {capital:,.0f} VND\n- Rủi ro/lệnh: {risk_pct:.2f}%"
+    )
+
+
+async def myrisk(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    prof = _get_risk_profile(chat_id)
+    await update.message.reply_text(
+        f"Risk profile hiện tại:\n- Vốn: {prof['capital_vnd']:,.0f} VND\n- Rủi ro/lệnh: {prof['risk_pct']:.2f}%"
+    )
 
 
 async def daily_report_job(context: ContextTypes.DEFAULT_TYPE):
-    msg = render_top3()
     chat_ids = _load_chat_ids()
     if not chat_ids:
         return
 
     for chat_id in chat_ids:
         try:
+            msg = render_top3(chat_id=chat_id)
             await context.bot.send_message(chat_id=chat_id, text=msg)
         except Exception:
             continue
@@ -277,16 +487,24 @@ def main():
     tz_name = os.getenv("BOT_TIMEZONE", "Asia/Saigon")
     tz = ZoneInfo(tz_name)
     report_time = _parse_report_time(os.getenv("DAILY_REPORT_TIME", "22:00")).replace(tzinfo=tz)
+    interval_min = int(_safe_float(os.getenv("INTRADAY_CHECK_MINUTES", "10"), 10))
+    interval_min = max(3, interval_min)
 
     app = ApplicationBuilder().token(token).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("top3", top3))
     app.add_handler(CommandHandler("watchlist", watchlist))
     app.add_handler(CommandHandler("reporttime", reporttime))
+    app.add_handler(CommandHandler("risk", risk))
+    app.add_handler(CommandHandler("myrisk", myrisk))
 
-    app.job_queue.run_daily(daily_report_job, time=report_time, name="daily_top3", data=None)
+    app.job_queue.run_daily(daily_report_job, time=report_time, name="daily_top3")
+    app.job_queue.run_repeating(intraday_alert_job, interval=interval_min * 60, first=20, name="intraday_alerts")
 
-    print(f"Bot is running... Daily report at {report_time.strftime('%H:%M')} ({tz_name})")
+    print(
+        f"Bot V2 running... Daily report at {report_time.strftime('%H:%M')} ({tz_name}); "
+        f"Intraday check every {interval_min} minutes"
+    )
     app.run_polling()
 
 
