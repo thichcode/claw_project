@@ -7,8 +7,10 @@ Bot Telegram để quản trị Zabbix nhanh từ chat.
 - `/hosts [N]` — xem danh sách host
 - `/host <keyword>` — tra cứu host
 - `/ack <eventid> <message>` — acknowledge event
-- `/disable <host>` — disable host
-- `/enable <host>` — enable host
+- `/disable <host>` — yêu cầu disable host (cần `/confirm`)
+- `/enable <host>` — yêu cầu enable host (cần `/confirm`)
+- `/confirm` — xác nhận thao tác nguy hiểm đang chờ
+- `/cancel` — hủy thao tác đang chờ
 
 ## 1) Chuẩn bị Zabbix API token
 Trên Zabbix (v6+):
@@ -29,6 +31,7 @@ Sửa `.env`:
 - `ZABBIX_URL=https://your-zabbix-domain`
 - `ZABBIX_API_TOKEN=...`
 - `ADMIN_USER_IDS=123456789` (khuyên nên set để khóa quyền)
+- `CONFIRM_TIMEOUT_SEC=60` (timeout xác nhận lệnh nguy hiểm)
 
 ## 3) Chạy
 ```bash

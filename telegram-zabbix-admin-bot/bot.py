@@ -1,4 +1,5 @@
 import os
+import time
 from datetime import datetime
 
 import requests
@@ -11,6 +12,11 @@ load_dotenv()
 ZABBIX_URL = os.getenv("ZABBIX_URL", "").rstrip("/")
 ZABBIX_API_TOKEN = os.getenv("ZABBIX_API_TOKEN", "").strip()
 ADMIN_USER_IDS_RAW = os.getenv("ADMIN_USER_IDS", "").strip()
+CONFIRM_TIMEOUT_SEC = int(os.getenv("CONFIRM_TIMEOUT_SEC", "60"))
+
+# In-memory pending confirmations:
+# key: "<chat_id>:<user_id>" -> {"action": "enable|disable", "hostid": "...", "query": "...", "expire_at": epoch}
+PENDING_ACTIONS: dict[str, dict] = {}
 
 
 def _parse_admin_ids() -> set[int]:
@@ -65,17 +71,47 @@ def _fmt_ts(ts: str | int) -> str:
         return str(ts)
 
 
+def _pending_key(chat_id: int, user_id: int) -> str:
+    return f"{chat_id}:{user_id}"
+
+
+def _set_pending(chat_id: int, user_id: int, action: str, hostid: str, query: str):
+    PENDING_ACTIONS[_pending_key(chat_id, user_id)] = {
+        "action": action,
+        "hostid": hostid,
+        "query": query,
+        "expire_at": time.time() + max(10, CONFIRM_TIMEOUT_SEC),
+    }
+
+
+def _get_pending(chat_id: int, user_id: int) -> dict | None:
+    k = _pending_key(chat_id, user_id)
+    x = PENDING_ACTIONS.get(k)
+    if not x:
+        return None
+    if time.time() > float(x.get("expire_at", 0)):
+        PENDING_ACTIONS.pop(k, None)
+        return None
+    return x
+
+
+def _clear_pending(chat_id: int, user_id: int):
+    PENDING_ACTIONS.pop(_pending_key(chat_id, user_id), None)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = update.effective_user
     await update.message.reply_text(
         "🤖 Zabbix Admin Bot sẵn sàng.\n\n"
         "Lệnh:\n"
         "/problems [N] - Top N problems đang mở (mặc định 10)\n"
-        "/hosts [N] - Top N hosts có issues (mặc định 10)\n"
+        "/hosts [N] - Top N hosts (mặc định 10)\n"
         "/host <host> - Xem nhanh trạng thái host\n"
         "/ack <eventid> <message> - Ack problem\n"
-        "/disable <host> - Disable host\n"
-        "/enable <host> - Enable host\n"
+        "/disable <host> - Yêu cầu disable host (cần /confirm)\n"
+        "/enable <host> - Yêu cầu enable host (cần /confirm)\n"
+        "/confirm - Xác nhận thao tác đang chờ\n"
+        "/cancel - Hủy thao tác đang chờ\n"
         "/ping - test bot\n\n"
         f"Your Telegram user id: {u.id}"
     )
@@ -256,6 +292,7 @@ def _find_hostid_by_query(query: str) -> str | None:
 
 async def disable(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
     if not _is_allowed(user_id):
         await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
         return
@@ -271,14 +308,18 @@ async def disable(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Không tìm thấy host.")
             return
 
-        _zabbix_api("host.update", {"hostid": hostid, "status": 1})
-        await update.message.reply_text(f"🛑 Đã disable host ({query}) [hostid={hostid}]")
+        _set_pending(chat_id, user_id, "disable", hostid, query)
+        await update.message.reply_text(
+            f"⚠️ Xác nhận disable host '{query}' [hostid={hostid}]\n"
+            f"Gõ /confirm trong {CONFIRM_TIMEOUT_SEC}s để thực thi, hoặc /cancel để hủy."
+        )
     except Exception as e:
         await update.message.reply_text(f"❌ Lỗi: {e}")
 
 
 async def enable(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
     if not _is_allowed(user_id):
         await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
         return
@@ -294,10 +335,56 @@ async def enable(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Không tìm thấy host.")
             return
 
-        _zabbix_api("host.update", {"hostid": hostid, "status": 0})
-        await update.message.reply_text(f"✅ Đã enable host ({query}) [hostid={hostid}]")
+        _set_pending(chat_id, user_id, "enable", hostid, query)
+        await update.message.reply_text(
+            f"⚠️ Xác nhận enable host '{query}' [hostid={hostid}]\n"
+            f"Gõ /confirm trong {CONFIRM_TIMEOUT_SEC}s để thực thi, hoặc /cancel để hủy."
+        )
     except Exception as e:
         await update.message.reply_text(f"❌ Lỗi: {e}")
+
+
+async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    if not _is_allowed(user_id):
+        await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+        return
+
+    pending = _get_pending(chat_id, user_id)
+    if not pending:
+        await update.message.reply_text("Không có thao tác nào đang chờ xác nhận, hoặc đã hết hạn.")
+        return
+
+    action = pending["action"]
+    hostid = pending["hostid"]
+    query = pending["query"]
+
+    try:
+        if action == "disable":
+            _zabbix_api("host.update", {"hostid": hostid, "status": 1})
+            await update.message.reply_text(f"🛑 Đã disable host ({query}) [hostid={hostid}]")
+        elif action == "enable":
+            _zabbix_api("host.update", {"hostid": hostid, "status": 0})
+            await update.message.reply_text(f"✅ Đã enable host ({query}) [hostid={hostid}]")
+        else:
+            await update.message.reply_text("Thao tác chờ không hợp lệ.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi: {e}")
+    finally:
+        _clear_pending(chat_id, user_id)
+
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    pending = _get_pending(chat_id, user_id)
+    if not pending:
+        await update.message.reply_text("Không có thao tác nào để hủy.")
+        return
+
+    _clear_pending(chat_id, user_id)
+    await update.message.reply_text("Đã hủy thao tác đang chờ.")
 
 
 def main():
@@ -315,6 +402,8 @@ def main():
     app.add_handler(CommandHandler("ack", ack))
     app.add_handler(CommandHandler("disable", disable))
     app.add_handler(CommandHandler("enable", enable))
+    app.add_handler(CommandHandler("confirm", confirm))
+    app.add_handler(CommandHandler("cancel", cancel))
 
     print("Zabbix admin bot is running...")
     app.run_polling()
