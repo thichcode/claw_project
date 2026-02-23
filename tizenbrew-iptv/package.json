@@ -1,0 +1,22 @@
+{
+  "name": "tizenbrew-iptv",
+  "version": "0.1.0",
+  "description": "Simple IPTV player module for TizenBrew",
+  "packageType": "app",
+  "appName": "Miso IPTV",
+  "appPath": "app/index.html",
+  "keys": [
+    "MediaPlay",
+    "MediaPause",
+    "MediaPlayPause",
+    "MediaStop",
+    "MediaFastForward",
+    "MediaRewind",
+    "ColorF0Red",
+    "ColorF1Green",
+    "ColorF2Yellow",
+    "ColorF3Blue"
+  ],
+  "serviceFile": "service.js",
+  "evaluateScriptOnDocumentStart": false
+}
