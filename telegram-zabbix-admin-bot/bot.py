@@ -108,6 +108,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/hosts [N] - Top N hosts (mặc định 10)\n"
         "/host <host> - Xem nhanh trạng thái host\n"
         "/ack <eventid> <message> - Ack problem\n"
+        "/groups [N] - List host groups (để lấy groupid)\n"
+        "/templates [N] - List templates (để lấy templateid)\n"
         "/disable <host> - Yêu cầu disable host (cần /confirm)\n"
         "/enable <host> - Yêu cầu enable host (cần /confirm)\n"
         "/mainton <host> [minutes] - Bật maintenance (cần /confirm)\n"
@@ -273,6 +275,75 @@ async def ack(update: Update, context: ContextTypes.DEFAULT_TYPE):
             },
         )
         await update.message.reply_text(f"✅ Đã ack event #{eventid}")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi: {e}")
+
+
+async def groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not _is_allowed(user_id):
+        await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+        return
+
+    limit = 30
+    if context.args and context.args[0].isdigit():
+        limit = max(1, min(int(context.args[0]), 200))
+
+    try:
+        result = _zabbix_api(
+            "hostgroup.get",
+            {
+                "output": ["groupid", "name"],
+                "sortfield": "name",
+                "sortorder": "ASC",
+                "limit": limit,
+            },
+        )
+
+        if not result:
+            await update.message.reply_text("Không có group nào.")
+            return
+
+        lines = [f"📁 Host Groups (top {limit})", ""]
+        for i, g in enumerate(result, 1):
+            lines.append(f"{i}) groupid={g.get('groupid')} | {g.get('name')}")
+
+        await update.message.reply_text("\n".join(lines))
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi: {e}")
+
+
+async def templates(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not _is_allowed(user_id):
+        await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+        return
+
+    limit = 30
+    if context.args and context.args[0].isdigit():
+        limit = max(1, min(int(context.args[0]), 200))
+
+    try:
+        result = _zabbix_api(
+            "template.get",
+            {
+                "output": ["templateid", "host", "name"],
+                "sortfield": "name",
+                "sortorder": "ASC",
+                "limit": limit,
+            },
+        )
+
+        if not result:
+            await update.message.reply_text("Không có template nào.")
+            return
+
+        lines = [f"🧩 Templates (top {limit})", ""]
+        for i, t in enumerate(result, 1):
+            tname = t.get("name") or t.get("host")
+            lines.append(f"{i}) templateid={t.get('templateid')} | {tname}")
+
+        await update.message.reply_text("\n".join(lines))
     except Exception as e:
         await update.message.reply_text(f"❌ Lỗi: {e}")
 
@@ -548,6 +619,8 @@ def main():
     app.add_handler(CommandHandler("hosts", hosts))
     app.add_handler(CommandHandler("host", host))
     app.add_handler(CommandHandler("ack", ack))
+    app.add_handler(CommandHandler("groups", groups))
+    app.add_handler(CommandHandler("templates", templates))
     app.add_handler(CommandHandler("disable", disable))
     app.add_handler(CommandHandler("enable", enable))
     app.add_handler(CommandHandler("mainton", mainton))

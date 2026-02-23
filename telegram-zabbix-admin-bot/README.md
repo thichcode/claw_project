@@ -7,6 +7,8 @@ Bot Telegram để quản trị Zabbix nhanh từ chat.
 - `/hosts [N]` — xem danh sách host
 - `/host <keyword>` — tra cứu host
 - `/ack <eventid> <message>` — acknowledge event
+- `/groups [N]` — list host groups (để lấy `groupid`)
+- `/templates [N]` — list templates (để lấy `templateid`)
 - `/disable <host>` — yêu cầu disable host (cần `/confirm`)
 - `/enable <host>` — yêu cầu enable host (cần `/confirm`)
 - `/mainton <host> [minutes]` — bật maintenance cho host (cần `/confirm`)
