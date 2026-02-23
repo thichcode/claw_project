@@ -18,6 +18,7 @@ DEFAULT_INTERVAL_SEC = int(os.getenv("DEFAULT_INTERVAL_SEC", "300"))
 API_URL = "https://api.uptimerobot.com/v2"
 
 PENDING_ACTIONS: dict[str, dict] = {}
+MAINTENANCE_JOBS: dict[str, dict] = {}
 
 
 def _parse_admin_ids() -> set[int]:
@@ -116,7 +117,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/updatehost <monitor_id> name=<...> url=<...> interval=<sec> - update monitor\n"
         "/pausehost <monitor_id> - pause monitor (/confirm)\n"
         "/starthost <monitor_id> - resume monitor (/confirm)\n"
+        "/deletehost <monitor_id> - delete monitor (/confirm)\n"
         "/maintain <monitor_id> <minutes> - pause then auto-resume (/confirm)\n"
+        "/maintlist - list active maintenance schedules\n"
+        "/maintcancel <maint_id> - cancel scheduled auto-resume\n"
         "/confirm - confirm pending action\n"
         "/cancel - cancel pending action\n"
         "/ping - health check\n\n"
@@ -288,6 +292,22 @@ async def starthost(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def deletehost(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _allowed(update.effective_user.id):
+        await update.message.reply_text("⛔ Not authorized")
+        return
+
+    if not context.args or not context.args[0].isdigit():
+        await update.message.reply_text("Usage: /deletehost <monitor_id>")
+        return
+
+    monitor_id = context.args[0]
+    _set_pending(update.effective_chat.id, update.effective_user.id, "delete", {"monitor_id": monitor_id})
+    await update.message.reply_text(
+        f"⚠️ Confirm delete monitor #{monitor_id}\nUse /confirm within {CONFIRM_TIMEOUT_SEC}s or /cancel"
+    )
+
+
 async def maintain(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _allowed(update.effective_user.id):
         await update.message.reply_text("⛔ Not authorized")
@@ -317,12 +337,16 @@ async def _resume_monitor_job(context: ContextTypes.DEFAULT_TYPE):
     data = context.job.data or {}
     monitor_id = data.get("monitor_id")
     chat_id = data.get("chat_id")
+    maint_id = data.get("maint_id")
 
     try:
         _ur_call("editMonitor", {"id": monitor_id, "status": 1})
         await context.bot.send_message(chat_id=chat_id, text=f"✅ Auto-resumed monitor #{monitor_id} after maintenance window")
     except Exception as e:
         await context.bot.send_message(chat_id=chat_id, text=f"❌ Failed to auto-resume monitor #{monitor_id}: {e}")
+    finally:
+        if maint_id:
+            MAINTENANCE_JOBS.pop(str(maint_id), None)
 
 
 async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -348,19 +372,32 @@ async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
             _ur_call("editMonitor", {"id": monitor_id, "status": 1})
             await update.message.reply_text(f"▶️ Started monitor #{monitor_id}")
 
+        elif action == "delete":
+            _ur_call("deleteMonitor", {"id": monitor_id})
+            await update.message.reply_text(f"🗑️ Deleted monitor #{monitor_id}")
+
         elif action == "maintain":
             minutes = int(payload.get("minutes", 30))
             chat_id = payload.get("chat_id", update.effective_chat.id)
 
             _ur_call("editMonitor", {"id": monitor_id, "status": 0})
-            context.job_queue.run_once(
+            maint_id = f"m{int(time.time())}_{monitor_id}"
+            job = context.job_queue.run_once(
                 _resume_monitor_job,
                 when=minutes * 60,
-                data={"monitor_id": monitor_id, "chat_id": chat_id},
-                name=f"resume_{monitor_id}_{int(time.time())}",
+                data={"monitor_id": monitor_id, "chat_id": chat_id, "maint_id": maint_id},
+                name=f"resume_{maint_id}",
             )
+            MAINTENANCE_JOBS[maint_id] = {
+                "monitor_id": str(monitor_id),
+                "chat_id": int(chat_id),
+                "start_ts": int(time.time()),
+                "end_ts": int(time.time()) + minutes * 60,
+                "minutes": minutes,
+                "job": job,
+            }
             await update.message.reply_text(
-                f"🛠️ Monitor #{monitor_id} paused for maintenance ({minutes} minute(s)). Auto-resume scheduled."
+                f"🛠️ Monitor #{monitor_id} paused for maintenance ({minutes} minute(s)). Auto-resume scheduled. maint_id={maint_id}"
             )
 
         else:
@@ -370,6 +407,53 @@ async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Error: {e}")
     finally:
         _clear_pending(update.effective_chat.id, update.effective_user.id)
+
+
+async def maintlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _allowed(update.effective_user.id):
+        await update.message.reply_text("⛔ Not authorized")
+        return
+
+    if not MAINTENANCE_JOBS:
+        await update.message.reply_text("Không có maintenance schedule nào đang active.")
+        return
+
+    now = int(time.time())
+    lines = ["🛠️ Active maintenance schedules", ""]
+    for mid, info in MAINTENANCE_JOBS.items():
+        remain = max(0, int(info.get("end_ts", now)) - now)
+        lines.append(
+            f"- maint_id={mid} | monitor=#{info.get('monitor_id')} | còn ~{remain//60}m {remain%60}s"
+        )
+    await update.message.reply_text("\n".join(lines))
+
+
+async def maintcancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _allowed(update.effective_user.id):
+        await update.message.reply_text("⛔ Not authorized")
+        return
+
+    if not context.args:
+        await update.message.reply_text("Usage: /maintcancel <maint_id>")
+        return
+
+    maint_id = context.args[0].strip()
+    info = MAINTENANCE_JOBS.get(maint_id)
+    if not info:
+        await update.message.reply_text("maint_id không tồn tại hoặc đã hoàn tất.")
+        return
+
+    job = info.get("job")
+    try:
+        if job:
+            job.schedule_removal()
+    except Exception:
+        pass
+
+    MAINTENANCE_JOBS.pop(maint_id, None)
+    await update.message.reply_text(
+        f"✅ Đã hủy auto-resume schedule {maint_id}. Monitor #{info.get('monitor_id')} vẫn đang PAUSED cho đến khi bạn /starthost."
+    )
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -395,7 +479,10 @@ def main():
     app.add_handler(CommandHandler("updatehost", updatehost))
     app.add_handler(CommandHandler("pausehost", pausehost))
     app.add_handler(CommandHandler("starthost", starthost))
+    app.add_handler(CommandHandler("deletehost", deletehost))
     app.add_handler(CommandHandler("maintain", maintain))
+    app.add_handler(CommandHandler("maintlist", maintlist))
+    app.add_handler(CommandHandler("maintcancel", maintcancel))
     app.add_handler(CommandHandler("confirm", confirm))
     app.add_handler(CommandHandler("cancel", cancel))
 

@@ -9,7 +9,10 @@ Bot Telegram để admin UptimeRobot: create/update/maintain/start/pause host mo
 - `/updatehost <monitor_id> name=<...> url=<...> interval=<sec>` — cập nhật monitor
 - `/pausehost <monitor_id>` + `/confirm`
 - `/starthost <monitor_id>` + `/confirm`
+- `/deletehost <monitor_id>` + `/confirm`
 - `/maintain <monitor_id> <minutes>` + `/confirm` (pause ngay, tự resume)
+- `/maintlist` — xem các maintenance schedule đang active
+- `/maintcancel <maint_id>` — hủy auto-resume schedule
 - `/cancel`
 
 ## Cài đặt
