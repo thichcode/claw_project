@@ -18,6 +18,7 @@ Simple IPTV app module for TizenBrew.
 - Green key: reload playlist
 
 ## Notes
+- HLS (`.m3u8`) playback uses native support when available, with `hls.js` fallback on desktop browsers.
 - Works best with `m3u8`/HLS streams on Samsung Tizen TVs.
 - Some codecs/streams may not be supported by TV hardware.
 

@@ -10,6 +10,7 @@ let channels = [];
 let filtered = [];
 let selectedIndex = 0;
 let focusArea = 'list'; // list | player | controls
+let hls = null;
 
 const DEFAULT_PLAYLIST = localStorage.getItem('misoIptv:lastPlaylist') || '';
 playlistUrlEl.value = DEFAULT_PLAYLIST;
@@ -122,7 +123,44 @@ function playSelected() {
   setStatus('Buffering...');
 
   try {
-    video.src = ch.url;
+    if (hls) {
+      hls.destroy();
+      hls = null;
+    }
+
+    const url = ch.url;
+    const isHls = /\.m3u8($|\?)/i.test(url) || url.toLowerCase().includes('m3u8');
+
+    if (isHls) {
+      // Native HLS support (Safari / some TV runtimes)
+      if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = url;
+        video.play().catch(() => {});
+        return;
+      }
+
+      // hls.js fallback (most desktop browsers)
+      if (window.Hls && window.Hls.isSupported()) {
+        hls = new window.Hls({ enableWorker: true });
+        hls.loadSource(url);
+        hls.attachMedia(video);
+        hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
+          video.play().catch(() => {});
+        });
+        hls.on(window.Hls.Events.ERROR, (_, data) => {
+          if (data?.fatal) {
+            setStatus(`HLS fatal: ${data.type || 'unknown'}`);
+          }
+        });
+        return;
+      }
+
+      setStatus('HLS not supported on this runtime');
+      return;
+    }
+
+    // Non-HLS direct playback
+    video.src = url;
     video.play().catch(() => {});
   } catch (err) {
     setStatus(`Play error: ${err.message}`);
