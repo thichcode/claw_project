@@ -12,6 +12,7 @@ _Learn about the person you're helping. Update this as you go._
 - **Notes:**
   - Never delete files without confirming
   - Ask before any external actions
+  - Prioritize speed over perfection
 
 ## Context
 
