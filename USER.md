@@ -10,6 +10,7 @@ _Learn about the person you're helping. Update this as you go._
 - **Timezone:**
   Asia/Saigon
 - **Notes:**
+  - Never delete files without confirming
 
 ## Context
 
