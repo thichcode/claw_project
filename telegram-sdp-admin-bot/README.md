@@ -1,26 +1,27 @@
 # Telegram ServiceDesk Plus Admin Bot (On-prem v14720)
 
-Bot Telegram để quản trị nhanh ManageEngine ServiceDesk Plus on-prem qua API.
+Bot Telegram để quản trị nhanh ManageEngine ServiceDesk Plus on-prem qua API (multi-site ready).
 
 ## Tính năng hiện có
 - `/requests [N]` — list ticket gần nhất
-- `/request <id>` — xem chi tiết ticket
+- `/request <id>` — xem chi tiết ticket (kèm site)
 - `/assign <id> <technician_name>`
 - `/setstatus <id> <status_name>`
 - `/setpriority <id> <priority_name>`
-- `/setgroup <id> <support_group_name>`
+- `/setgroup <id> <support_group_name>` (validate theo site của request)
 - `/addnote <id> <note text>`
 - `/close <id>` + `/confirm` (2 bước)
 
-### Danh mục tra cứu nhanh
-- `/technicians [N]` — danh sách technician
-- `/statuses` — danh sách status
-- `/priorities` — danh sách priority
-- `/sgroups [N]` — danh sách support group
+## Lookup
+- `/sites [N]` — list site + site_id
+- `/technicians [N]`
+- `/statuses`
+- `/priorities`
+- `/sgroups [N] [site_id]` — list support groups, có filter theo site
 
-### Quản lý support group
-- `/sgcreate <name> [| description]` + `/confirm`
-- `/sgupdate <group_id> <new_name> [| description]` + `/confirm`
+## Quản lý support group (site-aware)
+- `/sgcreate <site_id> <name> [| description]` + `/confirm`
+- `/sgupdate <group_id> <site_id> <new_name> [| description]` + `/confirm`
 - `/cancel`
 
 ## Cài đặt
@@ -48,9 +49,9 @@ python bot.py
 ## Lưu ý tương thích API
 - Bot dùng endpoint `/api/v3/...` cho SDP on-prem.
 - Một số build có khác biệt payload/field nhỏ.
-- Nếu lệnh nào lỗi do schema API của instance bạn, gửi lỗi đó mình patch đúng bản 14720 của bạn.
+- Nếu lệnh nào lỗi do schema API instance của bạn, gửi lỗi mình patch theo đúng build.
 
 ## Security
 - Bắt buộc set `ADMIN_USER_IDS` trong production.
 - Dùng API key riêng cho bot, phân quyền tối thiểu.
-- Lệnh đóng ticket + create/update support group đã có xác nhận 2 bước.
+- Lệnh đóng ticket + create/update support group có xác nhận 2 bước.
