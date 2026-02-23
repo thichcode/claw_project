@@ -22,6 +22,7 @@ Bot Telegram để quản trị nhanh ManageEngine ServiceDesk Plus on-prem qua 
 ## Quản lý support group (site-aware, bắt buộc có technician)
 - `/sgcreate <site_id> <name> | <techaccount1,techaccount2> [| description]` + `/confirm`
 - `/sgupdate <group_id> <site_id> <new_name> | <techaccount1,techaccount2> [| description]` + `/confirm`
+- Bot sẽ validate techaccount phải thuộc đúng `site_id` (nếu API site-technician khả dụng)
 - `/cancel`
 
 Ví dụ:

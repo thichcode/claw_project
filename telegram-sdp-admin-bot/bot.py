@@ -159,10 +159,26 @@ def _get_all_technicians(limit: int = 500) -> list[dict]:
     return _extract_list(_sdp_get("/api/v3/technicians", params={"input_data": json.dumps(input_data, ensure_ascii=False)}), "technicians")
 
 
-def _resolve_techaccounts(identifiers: list[str]) -> tuple[list[dict], list[str]]:
+def _site_technician_id_set(site_id: str) -> set[str] | None:
+    """
+    Best-effort fetch technicians in a specific site.
+    Returns set(ids) when endpoint works, else None.
+    """
+    try:
+        input_data = {"list_info": {"row_count": 500, "start_index": 1, "sort_field": "name", "sort_order": "asc"}}
+        data = _sdp_get(f"/api/v3/sites/{site_id}/technicians", params={"input_data": json.dumps(input_data, ensure_ascii=False)})
+        rows = _extract_list(data, "technicians")
+        if not rows:
+            return set()
+        return {str(t.get("id")) for t in rows if t.get("id") is not None}
+    except Exception:
+        return None
+
+
+def _resolve_techaccounts(identifiers: list[str], site_id: str | None = None) -> tuple[list[dict], list[str], list[str]]:
     """
     Resolve technician accounts by login_name first, then name.
-    Returns: (technician_refs_for_payload, unresolved_identifiers)
+    Returns: (technician_refs_for_payload, unresolved_identifiers, out_of_site_identifiers)
     """
     techs = _get_all_technicians()
     by_login = {}
@@ -175,8 +191,11 @@ def _resolve_techaccounts(identifiers: list[str]) -> tuple[list[dict], list[str]
         if name:
             by_name[name] = t
 
+    site_allow_ids = _site_technician_id_set(str(site_id)) if site_id is not None else None
+
     resolved = []
     missing = []
+    out_of_site = []
     seen_ids = set()
     for raw in identifiers:
         k = raw.strip().lower()
@@ -186,13 +205,23 @@ def _resolve_techaccounts(identifiers: list[str]) -> tuple[list[dict], list[str]
         if not t:
             missing.append(raw)
             continue
-        tid = t.get("id")
-        if tid is None or str(tid) in seen_ids:
-            continue
-        seen_ids.add(str(tid))
-        resolved.append({"id": str(tid), "name": t.get("name") or t.get("first_name") or raw})
 
-    return resolved, missing
+        tid = t.get("id")
+        if tid is None:
+            missing.append(raw)
+            continue
+
+        tid_s = str(tid)
+        if site_allow_ids is not None and tid_s not in site_allow_ids:
+            out_of_site.append(raw)
+            continue
+
+        if tid_s in seen_ids:
+            continue
+        seen_ids.add(tid_s)
+        resolved.append({"id": tid_s, "name": t.get("name") or t.get("first_name") or raw})
+
+    return resolved, missing, out_of_site
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -514,7 +543,7 @@ async def sgcreate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
-        tech_refs, missing = _resolve_techaccounts(tech_keys)
+        tech_refs, missing, out_of_site = _resolve_techaccounts(tech_keys, site_id=site_id)
     except Exception as e:
         await update.message.reply_text(f"❌ Error khi resolve technician: {e}")
         return
@@ -522,8 +551,11 @@ async def sgcreate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if missing:
         await update.message.reply_text(f"Không tìm thấy techaccount: {', '.join(missing)}")
         return
+    if out_of_site:
+        await update.message.reply_text(f"Techaccount không thuộc site_id={site_id}: {', '.join(out_of_site)}")
+        return
     if not tech_refs:
-        await update.message.reply_text("Không resolve được technician hợp lệ.")
+        await update.message.reply_text("Không resolve được technician hợp lệ cho site này.")
         return
 
     _set_pending(
@@ -567,7 +599,7 @@ async def sgupdate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
-        tech_refs, missing = _resolve_techaccounts(tech_keys)
+        tech_refs, missing, out_of_site = _resolve_techaccounts(tech_keys, site_id=site_id)
     except Exception as e:
         await update.message.reply_text(f"❌ Error khi resolve technician: {e}")
         return
@@ -575,8 +607,11 @@ async def sgupdate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if missing:
         await update.message.reply_text(f"Không tìm thấy techaccount: {', '.join(missing)}")
         return
+    if out_of_site:
+        await update.message.reply_text(f"Techaccount không thuộc site_id={site_id}: {', '.join(out_of_site)}")
+        return
     if not tech_refs:
-        await update.message.reply_text("Không resolve được technician hợp lệ.")
+        await update.message.reply_text("Không resolve được technician hợp lệ cho site này.")
         return
 
     _set_pending(
