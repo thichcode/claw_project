@@ -7,10 +7,11 @@ Bot Telegram trả về **Top 3 mã ưu tiên cho phiên kế tiếp** với b�
 - RSI(14)
 - MACD (line > signal và histogram dương)
 
-V2 bổ sung:
+V2.1 bổ sung:
 1. **Market filter VN-Index** (BULLISH/CAUTION)
 2. **Intraday alert** khi giá vào vùng mua
 3. **Quản lý vốn** theo rủi ro %/lệnh (gợi ý số lượng cp)
+4. **Volume confirmation cho intraday alert** (lọc nhiễu tốt hơn)
 
 ---
 
@@ -37,6 +38,8 @@ Mở `.env`, điền:
 - `RISK_PER_TRADE_PCT=1.0`
 - `INTRADAY_ALERT_ENABLED=true`
 - `INTRADAY_CHECK_MINUTES=10`
+- `INTRADAY_VOLUME_MULTIPLIER=1.3`
+- `INTRADAY_MIN_LAST_VOLUME=50000`
 
 ## 3) Chạy bot
 ```bash
@@ -54,6 +57,7 @@ python bot.py
 ## 5) Tự động
 - **Báo cáo hằng ngày**: lúc `DAILY_REPORT_TIME`
 - **Intraday alerts**: check mỗi `INTRADAY_CHECK_MINUTES` phút trong giờ giao dịch
+- Chỉ alert khi **giá nằm trong vùng mua** và **volume 15m vượt ngưỡng** (`INTRADAY_VOLUME_MULTIPLIER`, `INTRADAY_MIN_LAST_VOLUME`)
 - Chat nào đã dùng `/start` hoặc `/top3` sẽ được nhận báo cáo/alert
 
 ## 6) File dữ liệu bot

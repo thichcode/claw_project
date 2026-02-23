@@ -1,5 +1,4 @@
 import json
-import math
 import os
 from datetime import datetime, time
 from pathlib import Path
@@ -317,6 +316,38 @@ def render_top3(chat_id: int | None = None) -> str:
 
 
 # ---------- Intraday alerts ----------
+def _fetch_intraday_snapshot(symbol: str) -> dict | None:
+    """
+    Pull recent 15m candles for intraday price/volume confirmation.
+    """
+    ticker = f"{symbol}.VN"
+    try:
+        df = yf.download(ticker, period="5d", interval="15m", progress=False, auto_adjust=True)
+        if df is None or df.empty or len(df) < 20:
+            return None
+
+        close = df["Close"].dropna()
+        vol = df["Volume"].fillna(0)
+        if close.empty or vol.empty:
+            return None
+
+        last_price = float(close.iloc[-1])
+        last_vol = float(vol.iloc[-1])
+
+        # Compare with recent intraday baseline (exclude last candle)
+        recent_base = vol.iloc[-17:-1] if len(vol) >= 17 else vol.iloc[:-1]
+        base = float(recent_base.mean()) if len(recent_base) > 0 else 0.0
+        vol_ratio = (last_vol / base) if base > 0 else 0.0
+
+        return {
+            "last_price": last_price,
+            "last_vol": last_vol,
+            "vol_ratio": float(vol_ratio),
+        }
+    except Exception:
+        return None
+
+
 def _is_market_time(now: datetime) -> bool:
     # Vietnam market sessions: ~09:15-11:30 and 13:00-14:45, Mon-Fri
     if now.weekday() >= 5:
@@ -336,6 +367,9 @@ async def intraday_alert_job(context: ContextTypes.DEFAULT_TYPE):
     enabled = os.getenv("INTRADAY_ALERT_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
     if not enabled:
         return
+
+    min_vol_ratio = _safe_float(os.getenv("INTRADAY_VOLUME_MULTIPLIER", "1.3"), 1.3)
+    min_last_vol = _safe_float(os.getenv("INTRADAY_MIN_LAST_VOLUME", "50000"), 50_000)
 
     tz_name = os.getenv("BOT_TIMEZONE", "Asia/Saigon")
     now = datetime.now(ZoneInfo(tz_name))
@@ -357,10 +391,23 @@ async def intraday_alert_job(context: ContextTypes.DEFAULT_TYPE):
 
     to_alert = []
     for p in picks:
+        if p["symbol"] in today_sent:
+            continue
+
+        snapshot = _fetch_intraday_snapshot(p["symbol"])
+        if not snapshot:
+            continue
+
         plan = p["plan"]
-        if plan["entry_low"] <= p["price"] <= plan["entry_high"]:
-            if p["symbol"] not in today_sent:
-                to_alert.append(p)
+        in_buy_zone = plan["entry_low"] <= snapshot["last_price"] <= plan["entry_high"]
+        vol_ok = snapshot["vol_ratio"] >= min_vol_ratio and snapshot["last_vol"] >= min_last_vol
+
+        if in_buy_zone and vol_ok:
+            p2 = dict(p)
+            p2["intraday_price"] = snapshot["last_price"]
+            p2["intraday_vol_ratio"] = snapshot["vol_ratio"]
+            p2["intraday_last_vol"] = snapshot["last_vol"]
+            to_alert.append(p2)
 
     if not to_alert:
         return
@@ -373,8 +420,9 @@ async def intraday_alert_job(context: ContextTypes.DEFAULT_TYPE):
         for chat_id in chat_ids:
             try:
                 msg = (
-                    f"🚨 Intraday alert: {p['symbol']} vào vùng mua\n"
-                    f"Giá hiện tại: {p['price']:.2f}\n"
+                    f"🚨 Intraday alert: {p['symbol']} vào vùng mua + volume xác nhận\n"
+                    f"Giá hiện tại: {p['intraday_price']:.2f}\n"
+                    f"Volume 15m: {p['intraday_last_vol']:,.0f} (x{p['intraday_vol_ratio']:.2f} so với nền gần nhất)\n"
                     f"Vùng mua: {p['plan']['entry_low']:.2f}-{p['plan']['entry_high']:.2f}\n"
                     f"SL: {p['plan']['sl']:.2f} | TP1: {p['plan']['tp1']:.2f} | TP2: {p['plan']['tp2']:.2f}"
                 )
@@ -402,7 +450,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _register_chat(chat_id)
 
     await update.message.reply_text(
-        "Xin chào, mình là bot phân tích cổ phiếu VN (V2).\n"
+        "Xin chào, mình là bot phân tích cổ phiếu VN (V2.1).\n"
         "Lệnh:\n"
         "/top3 - Top 3 mã ưu tiên + vùng mua/SL/TP + khối lượng\n"
         "/watchlist - Xem danh sách mã đang quét\n"
@@ -430,9 +478,12 @@ async def reporttime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tz_name = os.getenv("BOT_TIMEZONE", "Asia/Saigon")
     report_time = os.getenv("DAILY_REPORT_TIME", "22:00")
     interval = os.getenv("INTRADAY_CHECK_MINUTES", "10")
+    vol_mul = os.getenv("INTRADAY_VOLUME_MULTIPLIER", "1.3")
+    min_last_vol = os.getenv("INTRADAY_MIN_LAST_VOLUME", "50000")
     await update.message.reply_text(
         f"Báo cáo tự động: mỗi ngày lúc {report_time} ({tz_name})\n"
-        f"Intraday check: mỗi {interval} phút trong giờ giao dịch"
+        f"Intraday check: mỗi {interval} phút trong giờ giao dịch\n"
+        f"Volume filter: >= x{vol_mul} và vol nến 15m >= {min_last_vol}"
     )
 
 
