@@ -88,6 +88,34 @@ function applySearch() {
   renderList();
 }
 
+function githubRawToJsdelivr(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname !== 'raw.githubusercontent.com') return null;
+    const parts = u.pathname.split('/').filter(Boolean);
+    if (parts.length < 4) return null;
+    const owner = parts[0];
+    const repo = parts[1];
+    const branch = parts[2];
+    const filePath = parts.slice(3).join('/');
+    return `https://cdn.jsdelivr.net/gh/${owner}/${repo}@${branch}/${filePath}`;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function fetchTextWithTimeout(url, timeoutMs = 15000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal, cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.text();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function loadPlaylist() {
   const url = playlistUrlEl.value.trim();
   if (!url) {
@@ -97,20 +125,34 @@ async function loadPlaylist() {
 
   try {
     setStatus('Loading playlist...');
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const text = await res.text();
+    let text;
+    let usedUrl = url;
+
+    try {
+      text = await fetchTextWithTimeout(url, 15000);
+    } catch (primaryErr) {
+      const mirrorUrl = githubRawToJsdelivr(url);
+      if (!mirrorUrl) throw primaryErr;
+
+      setStatus('Primary URL failed, trying mirror...');
+      text = await fetchTextWithTimeout(mirrorUrl, 15000);
+      usedUrl = mirrorUrl;
+    }
 
     channels = parseM3U(text);
     filtered = [...channels];
     selectedIndex = 0;
     renderList();
 
-    localStorage.setItem('misoIptv:lastPlaylist', url);
+    localStorage.setItem('misoIptv:lastPlaylist', usedUrl);
     setStatus(`Loaded ${channels.length} channels`);
   } catch (err) {
     console.error(err);
-    setStatus(`Load failed: ${err.message}`);
+    if (err?.name === 'AbortError') {
+      setStatus('Load failed: timeout (network/TLS blocked?)');
+      return;
+    }
+    setStatus(`Load failed: ${err.message || 'unknown error'}`);
   }
 }
 
