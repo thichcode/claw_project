@@ -12,7 +12,7 @@ let selectedIndex = 0;
 let focusArea = 'list'; // list | player | controls
 let hls = null;
 
-const DEFAULT_PLAYLIST = localStorage.getItem('misoIptv:lastPlaylist') || '';
+const DEFAULT_PLAYLIST = localStorage.getItem('misoIptv:lastPlaylist') || 'https://raw.githubusercontent.com/thichcode/thichcode/refs/heads/main/fptplay.m3u';
 playlistUrlEl.value = DEFAULT_PLAYLIST;
 
 function setStatus(text) {
