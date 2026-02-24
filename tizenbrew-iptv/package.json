@@ -1,11 +1,15 @@
 {
   "name": "tizenbrew-iptv",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Simple IPTV player module for TizenBrew",
   "license": "MIT",
   "private": false,
   "publishConfig": {
     "access": "public"
+  },
+  "scripts": {
+    "pack:check": "npm pack --dry-run",
+    "publish:public": "npm publish --access public"
   },
   "files": [
     "app",

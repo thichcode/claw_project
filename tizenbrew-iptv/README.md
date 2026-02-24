@@ -2,6 +2,18 @@
 
 Simple IPTV app module for TizenBrew.
 
+## Install
+```bash
+npm i tizenbrew-iptv
+```
+
+## Publish (maintainer)
+```bash
+npm login
+npm run pack:check
+npm run publish:public
+```
+
 ## Features
 - Load M3U playlist from URL
 - Channel list + search
