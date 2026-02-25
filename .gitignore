@@ -1,0 +1,27 @@
+# OpenClaw/local workspace internals
+.openclaw/
+.pi/
+AGENTS.md
+BOOTSTRAP.md
+HEARTBEAT.md
+IDENTITY.md
+SOUL.md
+TOOLS.md
+USER.md
+
+# Secrets & credentials
+**/.env
+**/.env.*
+!**/.env.example
+**/*secret*
+**/*token*
+**/*credential*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+
+# Runtime/cache artifacts
+**/__pycache__/
+**/*.pyc
+**/.venv/
