@@ -28,7 +28,7 @@ Multi-agent (OpenClaw-style roles):
 python rca_multi_agent.py
 ```
 
-With input payload (request_id taken from input):
+With input payload (request_id taken from input, and can include only `hostname` + `eventid`):
 
 ```bash
 python rca_multi_agent.py --input-json input.json
@@ -67,6 +67,9 @@ Nếu không set `LLM_API_KEY` thì script vẫn chạy, chỉ dùng fallback RC
 - `TIME_WINDOW_MINUTES` (default: `10`)
 - `BATCH_SIZE` (default: `20`)
 - `MAX_CONCURRENCY` (default: `8`)
+- `ENRICH_LOOKBACK_MINUTES` (default: `20`)
+- `ENRICH_TOP_N_ITEMS` (default: `5`)
+- `ENRICH_ITEM_KEY_HINTS` (default: `system.cpu,vm.memory,vfs.fs,net.if,proc.num,log,kubelet,docker,mysql`)
 - `TTL_ZABBIX_SEC` (default: `90`)
 - `TTL_UPTIME_SEC` (default: `180`)
 - `TTL_LLM_SEC` (default: `600`)

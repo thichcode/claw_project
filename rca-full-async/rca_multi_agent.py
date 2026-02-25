@@ -31,6 +31,14 @@ TIME_WINDOW_MINUTES = int(os.getenv("TIME_WINDOW_MINUTES", "10"))
 TIME_WINDOW_SEC = TIME_WINDOW_MINUTES * 60
 HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "25"))
 MAX_CONCURRENCY = int(os.getenv("MAX_CONCURRENCY", "6"))
+ENRICH_TOP_N_ITEMS = int(os.getenv("ENRICH_TOP_N_ITEMS", "5"))
+ENRICH_LOOKBACK_MINUTES = int(os.getenv("ENRICH_LOOKBACK_MINUTES", "20"))
+ENRICH_ITEM_KEY_HINTS = [
+    s.strip() for s in os.getenv(
+        "ENRICH_ITEM_KEY_HINTS",
+        "system.cpu,vm.memory,vfs.fs,net.if,proc.num,log,kubelet,docker,mysql",
+    ).split(",") if s.strip()
+]
 
 # ===== ServiceDesk Plus =====
 SDP_URL = os.getenv("SDP_URL", "").rstrip("/")
@@ -65,6 +73,17 @@ async def to_thread(fn, *args, **kwargs):
     return await asyncio.to_thread(fn, *args, **kwargs)
 
 
+def zabbix_rpc(method: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    payload = {
+        "jsonrpc": "2.0",
+        "method": method,
+        "params": params,
+        "auth": ZABBIX_TOKEN,
+        "id": 1,
+    }
+    return http_json_request("POST", f"{ZABBIX_URL}/api_jsonrpc.php", payload)
+
+
 # ---------------- Data fetch ----------------
 async def fetch_zabbix_problems() -> List[Dict[str, Any]]:
     if not (ZABBIX_URL and ZABBIX_TOKEN):
@@ -78,6 +97,7 @@ async def fetch_zabbix_problems() -> List[Dict[str, Any]]:
             "sortorder": "DESC",
             "limit": 100,
             "selectTags": "extend",
+            "selectHosts": ["host", "name", "hostid"],
         },
         "auth": ZABBIX_TOKEN,
         "id": 1,
@@ -150,6 +170,9 @@ def correlate(zbx: List[Dict[str, Any]], upr: List[Dict[str, Any]]) -> List[Dict
         if datetime.fromtimestamp(zts, tz=timezone.utc) < since:
             continue
         matched = [e for e in up_events if within_window(zts, e["ts"])]
+        hosts = z.get("hosts") or []
+        host0 = hosts[0] if hosts else {}
+        hostname = host0.get("host") or host0.get("name")
         groups.append({
             "zabbix": {
                 "eventid": z.get("eventid"),
@@ -157,12 +180,138 @@ def correlate(zbx: List[Dict[str, Any]], upr: List[Dict[str, Any]]) -> List[Dict
                 "severity": z.get("severity"),
                 "tags": z.get("tags", []),
                 "clock": z.get("clock"),
+                "hostname": hostname,
+                "hostid": host0.get("hostid"),
             },
             "zabbix_ts": zts,
             "matched_uptime": matched,
             "window_min": TIME_WINDOW_MINUTES,
         })
     return groups
+
+
+# ---------------- Zabbix enrichment (hostname + eventid) ----------------
+async def zabbix_hostid_from_hostname(hostname: str) -> Optional[str]:
+    if not (ZABBIX_URL and ZABBIX_TOKEN and hostname):
+        return None
+    data = await to_thread(zabbix_rpc, "host.get", {"filter": {"host": [hostname]}, "output": ["hostid", "host", "name"], "limit": 1})
+    result = data.get("result", [])
+    if result:
+        return str(result[0].get("hostid"))
+    return None
+
+
+async def zabbix_event_clock(eventid: str) -> Optional[int]:
+    if not (ZABBIX_URL and ZABBIX_TOKEN and eventid):
+        return None
+    data = await to_thread(zabbix_rpc, "event.get", {"eventids": [str(eventid)], "output": ["eventid", "clock"], "limit": 1})
+    result = data.get("result", [])
+    if not result:
+        return None
+    return parse_ts(result[0].get("clock"))
+
+
+async def zabbix_item_candidates(hostid: str) -> List[Dict[str, Any]]:
+    data = await to_thread(
+        zabbix_rpc,
+        "item.get",
+        {
+            "hostids": [hostid],
+            "output": ["itemid", "name", "key_", "value_type", "units"],
+            "search": {"key_": ENRICH_ITEM_KEY_HINTS},
+            "searchByAny": True,
+            "sortfield": "name",
+            "limit": 200,
+        },
+    )
+    return data.get("result", [])
+
+
+async def zabbix_item_history(itemid: str, value_type: int, time_from: int, time_till: int) -> List[Dict[str, Any]]:
+    history_type = value_type if value_type in (0, 3) else 0
+    data = await to_thread(
+        zabbix_rpc,
+        "history.get",
+        {
+            "history": history_type,
+            "itemids": [str(itemid)],
+            "time_from": int(time_from),
+            "time_till": int(time_till),
+            "output": "extend",
+            "sortfield": "clock",
+            "sortorder": "ASC",
+            "limit": 200,
+        },
+    )
+    return data.get("result", [])
+
+
+def summarize_series(points: List[float]) -> Dict[str, Any]:
+    if not points:
+        return {"count": 0, "latest": None, "min": None, "max": None, "avg": None, "delta": None}
+    mn = min(points)
+    mx = max(points)
+    avg = sum(points) / len(points)
+    latest = points[-1]
+    return {
+        "count": len(points),
+        "latest": latest,
+        "min": mn,
+        "max": mx,
+        "avg": avg,
+        "delta": mx - mn,
+    }
+
+
+async def zabbix_enrich_from_hostname_eventid(hostname: str, eventid: str) -> Dict[str, Any]:
+    """Best-effort enrichment for CPU/mem/disk/net/process/log(+k8s/docker/mysql keys if present)."""
+    if not (hostname and eventid and ZABBIX_URL and ZABBIX_TOKEN):
+        return {"hostname": hostname, "eventid": eventid, "metrics": [], "note": "missing inputs or zabbix creds"}
+
+    hostid = await zabbix_hostid_from_hostname(hostname)
+    event_clock = await zabbix_event_clock(eventid)
+    if not hostid or not event_clock:
+        return {"hostname": hostname, "eventid": eventid, "metrics": [], "note": "hostid/event_clock not found"}
+
+    time_till = event_clock + TIME_WINDOW_SEC
+    time_from = event_clock - (ENRICH_LOOKBACK_MINUTES * 60)
+
+    items = await zabbix_item_candidates(hostid)
+    sem = asyncio.Semaphore(MAX_CONCURRENCY)
+
+    async def one_item(it: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        async with sem:
+            vt = int(it.get("value_type", 0) or 0)
+            if vt not in (0, 3):
+                return None
+            hist = await zabbix_item_history(str(it.get("itemid")), vt, time_from, time_till)
+            vals: List[float] = []
+            for h in hist:
+                try:
+                    vals.append(float(h.get("value")))
+                except Exception:
+                    pass
+            s = summarize_series(vals)
+            if s["count"] == 0:
+                return None
+            return {
+                "itemid": it.get("itemid"),
+                "name": it.get("name"),
+                "key": it.get("key_"),
+                "units": it.get("units"),
+                "summary": s,
+            }
+
+    metric_rows = [m for m in await asyncio.gather(*(one_item(i) for i in items)) if m is not None]
+    metric_rows.sort(key=lambda x: (x.get("summary", {}).get("delta") or 0), reverse=True)
+
+    return {
+        "hostname": hostname,
+        "eventid": eventid,
+        "event_clock": event_clock,
+        "window": {"from": time_from, "till": time_till},
+        "metrics": metric_rows[:ENRICH_TOP_N_ITEMS],
+    }
 
 
 # ---------------- LLM agents ----------------
@@ -188,9 +337,9 @@ async def llm_json(system_prompt: str, user_payload: Dict[str, Any]) -> Dict[str
         return {"raw": content}
 
 
-async def collector_agent(groups: List[Dict[str, Any]]) -> Dict[str, Any]:
-    prompt = "You are Collector Agent. Normalize incidents and produce compact timeline. Return JSON with timeline[] and key_entities[]."
-    return await llm_json(prompt, {"groups": groups})
+async def collector_agent(groups: List[Dict[str, Any]], enrichments: List[Dict[str, Any]]) -> Dict[str, Any]:
+    prompt = "You are Collector Agent. Normalize incidents + enrichment signals and produce compact timeline. Return JSON with timeline[] and key_entities[] and top_signals[]."
+    return await llm_json(prompt, {"groups": groups, "enrichments": enrichments})
 
 
 async def correlation_agent(groups: List[Dict[str, Any]], collected: Dict[str, Any]) -> Dict[str, Any]:
@@ -360,13 +509,14 @@ async def send_teams(text: str):
     await to_thread(http_json_request, "POST", TEAMS_WEBHOOK_URL, {"text": text})
 
 
-def render_report(decision: Dict[str, Any], groups_count: int, sdp_done: bool, request_id: str) -> str:
+def render_report(decision: Dict[str, Any], groups_count: int, enrichment_count: int, sdp_done: bool, request_id: str) -> str:
     confidence = decision.get("confidence", "n/a")
     root_cause = decision.get("root_cause", "N/A")
     impact = decision.get("impact", "N/A")
     return (
         f"🚨 RCA Multi-Agent Report - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
         f"- Correlated groups: {groups_count}\n"
+        f"- Enriched host/event pairs: {enrichment_count}\n"
         f"- Root cause: {root_cause}\n"
         f"- Confidence: {confidence}\n"
         f"- Impact: {impact}\n"
@@ -387,8 +537,35 @@ async def main(cli_request_id: Optional[str], input_payload: Optional[Dict[str, 
 
     groups = correlate(zbx, upr)
 
+    # Enrichment from hostname + eventid (best effort)
+    pairs = []
+    seen = set()
+
+    # allow direct input mode: only hostname + eventid provided
+    ip = input_payload or {}
+    in_hostname = ip.get("hostname") or (ip.get("host") or {}).get("name")
+    in_eventid = ip.get("eventid") or (ip.get("event") or {}).get("id")
+    if in_hostname and in_eventid and (str(in_hostname), str(in_eventid)) not in seen:
+        seen.add((str(in_hostname), str(in_eventid)))
+        pairs.append((str(in_hostname), str(in_eventid)))
+    for g in groups:
+        z = g.get("zabbix") or {}
+        h = z.get("hostname")
+        e = z.get("eventid")
+        if h and e and (h, str(e)) not in seen:
+            seen.add((h, str(e)))
+            pairs.append((h, str(e)))
+
+    sem = asyncio.Semaphore(MAX_CONCURRENCY)
+
+    async def enrich_one(hostname: str, eventid: str) -> Dict[str, Any]:
+        async with sem:
+            return await zabbix_enrich_from_hostname_eventid(hostname, eventid)
+
+    enrichments = await asyncio.gather(*(enrich_one(h, e) for h, e in pairs)) if pairs else []
+
     # Multi-agent orchestration
-    collected = await collector_agent(groups)
+    collected = await collector_agent(groups, enrichments)
     corr_out = await correlation_agent(groups, collected)
 
     hypotheses = await hypothesis_agent(corr_out)
@@ -400,7 +577,7 @@ async def main(cli_request_id: Optional[str], input_payload: Optional[Dict[str, 
     sdp_result = await run_sdp_flow(request_id, decision)
     sdp_done = sdp_result is not None
 
-    report = render_report(decision, len(groups), sdp_done, request_id)
+    report = render_report(decision, len(groups), len(enrichments), sdp_done, request_id)
     await send_teams(report)
 
     print("[OK] Multi-agent RCA complete")
