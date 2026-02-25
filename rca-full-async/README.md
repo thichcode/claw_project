@@ -14,6 +14,21 @@ Python script for asynchronous RCA pipeline:
 python rca_full_async_stdlib.py
 ```
 
+## Ollama support
+
+Yes, dùng Ollama **ok** nếu bật OpenAI-compatible API.
+
+Ví dụ:
+
+```bash
+export LLM_API_KEY=ollama
+export LLM_MODEL=qwen2.5:7b-instruct
+export LLM_URL=http://127.0.0.1:11434/v1/chat/completions
+python rca_full_async_stdlib.py
+```
+
+Nếu không set `LLM_API_KEY` thì script vẫn chạy, chỉ dùng fallback RCA text.
+
 ## Environment variables
 
 - `ZABBIX_URL`
