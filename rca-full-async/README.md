@@ -7,6 +7,12 @@ Python script for asynchronous RCA pipeline:
 - Batch processing with controlled concurrency
 - Optional LLM summary
 - Microsoft Teams webhook output
+- Optional ServiceDesk Plus v14720+ flow:
+  1) update solution
+  2) add exactly 1 task
+  3) close that task
+  4) add worklog
+  5) close ticket
 
 ## Run
 
@@ -44,3 +50,10 @@ Nếu không set `LLM_API_KEY` thì script vẫn chạy, chỉ dùng fallback RC
 - `TTL_ZABBIX_SEC` (default: `90`)
 - `TTL_UPTIME_SEC` (default: `180`)
 - `TTL_LLM_SEC` (default: `600`)
+- `SDP_URL` (ví dụ: `https://helpdesk.example.com`)
+- `SDP_TECHNICIAN_KEY`
+- `SDP_REQUEST_ID`
+- `SDP_TASK_TITLE` (default: `RCA investigation`)
+- `SDP_TASK_OWNER` (optional)
+- `SDP_RESOLUTION_PREFIX` (default: `[AUTO RCA]`)
+- `SDP_CLOSE_STATUS` (default: `Closed`)

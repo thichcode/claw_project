@@ -33,6 +33,15 @@ LLM_URL = os.getenv("LLM_URL", "https://api.openai.com/v1/chat/completions")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
 
+# ServiceDesk Plus (v14720+) optional integration
+SDP_URL = os.getenv("SDP_URL", "").rstrip("/")
+SDP_TECHNICIAN_KEY = os.getenv("SDP_TECHNICIAN_KEY", "")
+SDP_REQUEST_ID = os.getenv("SDP_REQUEST_ID", "")
+SDP_TASK_TITLE = os.getenv("SDP_TASK_TITLE", "RCA investigation")
+SDP_TASK_OWNER = os.getenv("SDP_TASK_OWNER", "")
+SDP_RESOLUTION_PREFIX = os.getenv("SDP_RESOLUTION_PREFIX", "[AUTO RCA]")
+SDP_CLOSE_STATUS = os.getenv("SDP_CLOSE_STATUS", "Closed")
+
 LOOKBACK_MINUTES = int(os.getenv("LOOKBACK_MINUTES", "30"))
 HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "20"))
 
@@ -111,15 +120,28 @@ CACHE = TTLCache()
 # =========================
 # HTTP helpers (blocking)
 # =========================
-def http_post_json(url: str, payload: Dict[str, Any], headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
-    data = json.dumps(payload).encode("utf-8")
+def http_json_request(
+    method: str,
+    url: str,
+    payload: Optional[Dict[str, Any]] = None,
+    headers: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    data = json.dumps(payload or {}).encode("utf-8") if payload is not None else None
     req_headers = {"Content-Type": "application/json"}
     if headers:
         req_headers.update(headers)
-    req = urllib.request.Request(url, data=data, headers=req_headers, method="POST")
+    req = urllib.request.Request(url, data=data, headers=req_headers, method=method.upper())
     with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
         raw = resp.read().decode("utf-8")
     return json.loads(raw) if raw else {}
+
+
+def http_post_json(url: str, payload: Dict[str, Any], headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    return http_json_request("POST", url, payload, headers)
+
+
+def http_put_json(url: str, payload: Dict[str, Any], headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    return http_json_request("PUT", url, payload, headers)
 
 
 def http_post_form(url: str, form: Dict[str, Any]) -> Dict[str, Any]:
@@ -392,6 +414,121 @@ async def send_teams(message_text: str):
     await asyncio.to_thread(http_post_json, TEAMS_WEBHOOK_URL, {"text": message_text})
 
 
+def sdp_headers() -> Dict[str, str]:
+    # SDP v14720 (on-prem) commonly accepts TECHNICIAN_KEY header
+    return {"TECHNICIAN_KEY": SDP_TECHNICIAN_KEY}
+
+
+def sdp_request_url(request_id: str) -> str:
+    return f"{SDP_URL}/api/v3/requests/{request_id}"
+
+
+def sdp_tasks_url(request_id: str) -> str:
+    return f"{SDP_URL}/api/v3/requests/{request_id}/tasks"
+
+
+def sdp_worklog_url(request_id: str) -> str:
+    return f"{SDP_URL}/api/v3/requests/{request_id}/worklogs"
+
+
+async def sdp_update_solution(request_id: str, solution_text: str) -> Dict[str, Any]:
+    payload = {
+        "request": {
+            "resolution": {"content": f"{SDP_RESOLUTION_PREFIX}\n\n{solution_text}"}
+        }
+    }
+    return await asyncio.to_thread(http_put_json, sdp_request_url(request_id), payload, sdp_headers())
+
+
+async def sdp_add_single_task(request_id: str, task_title: str) -> Dict[str, Any]:
+    task_payload: Dict[str, Any] = {
+        "task": {
+            "title": task_title,
+            "description": "Auto-created RCA execution task",
+        }
+    }
+    if SDP_TASK_OWNER:
+        task_payload["task"]["owner"] = {"name": SDP_TASK_OWNER}
+
+    return await asyncio.to_thread(http_post_json, sdp_tasks_url(request_id), task_payload, sdp_headers())
+
+
+async def sdp_close_task(request_id: str, task_id: str) -> Dict[str, Any]:
+    payload = {"task": {"status": {"name": "Completed"}}}
+    return await asyncio.to_thread(
+        http_put_json,
+        f"{sdp_tasks_url(request_id)}/{task_id}",
+        payload,
+        sdp_headers(),
+    )
+
+
+async def sdp_add_worklog(request_id: str, worklog_text: str) -> Dict[str, Any]:
+    payload = {
+        "worklog": {
+            "description": worklog_text,
+            "time_spent": "0:15",
+        }
+    }
+    return await asyncio.to_thread(http_post_json, sdp_worklog_url(request_id), payload, sdp_headers())
+
+
+async def sdp_close_ticket(request_id: str) -> Dict[str, Any]:
+    payload = {"request": {"status": {"name": SDP_CLOSE_STATUS}}}
+    return await asyncio.to_thread(http_put_json, sdp_request_url(request_id), payload, sdp_headers())
+
+
+def _extract_id(resp: Dict[str, Any], *keys: str) -> Optional[str]:
+    cur: Any = resp
+    for k in keys:
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(k)
+    if cur is None:
+        return None
+    return str(cur)
+
+
+async def run_servicedesk_plus_flow(rca_text: str) -> Optional[Dict[str, Any]]:
+    """
+    v14720 flow requested:
+    1) update solution
+    2) add exactly 1 task
+    3) close that task
+    4) add worklog
+    5) close ticket
+    """
+    if not (SDP_URL and SDP_TECHNICIAN_KEY and SDP_REQUEST_ID):
+        return None
+
+    out: Dict[str, Any] = {}
+
+    out["update_solution"] = await sdp_update_solution(SDP_REQUEST_ID, rca_text)
+
+    created_task = await sdp_add_single_task(SDP_REQUEST_ID, SDP_TASK_TITLE)
+    out["create_task"] = created_task
+
+    task_id = (
+        _extract_id(created_task, "task", "id")
+        or _extract_id(created_task, "response", "task", "id")
+        or _extract_id(created_task, "response", "id")
+    )
+
+    if task_id:
+        out["close_task"] = await sdp_close_task(SDP_REQUEST_ID, task_id)
+    else:
+        out["close_task"] = {"warning": "Task created but task_id not found in response; skip close_task."}
+
+    out["worklog"] = await sdp_add_worklog(
+        SDP_REQUEST_ID,
+        "RCA automation completed: solution updated, single task handled, ticket ready to close.",
+    )
+
+    out["close_ticket"] = await sdp_close_ticket(SDP_REQUEST_ID)
+
+    return out
+
+
 # =========================
 # Main
 # =========================
@@ -405,18 +542,27 @@ async def main():
         summaries = await process_groups_batched(corr_groups)
         rca_md = await generate_rca(corr_groups, summaries)
 
+        sdp_result = await run_servicedesk_plus_flow(rca_md)
+
+        sdp_line = "- ServiceDesk Plus: skipped (missing SDP env)"
+        if sdp_result is not None:
+            sdp_line = f"- ServiceDesk Plus: done (request_id={SDP_REQUEST_ID})"
+
         report = (
             f"🚨 RCA Report - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
             f"- Lookback: {LOOKBACK_MINUTES}m\n"
             f"- Correlation window: ±{TIME_WINDOW_MINUTES}m\n"
             f"- Zabbix problems fetched: {len(zabbix_problems)}\n"
             f"- Uptime monitors fetched: {len(uptime_monitors)}\n"
-            f"- Correlated groups: {len(corr_groups)}\n\n"
+            f"- Correlated groups: {len(corr_groups)}\n"
+            f"{sdp_line}\n\n"
             f"{rca_md}"
         )
 
         await send_teams(report)
         print("[OK] RCA complete.")
+        if sdp_result is not None:
+            print("[OK] ServiceDesk Plus flow complete.")
     finally:
         await asyncio.to_thread(CACHE.cleanup)
         CACHE.close()
