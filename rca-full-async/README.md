@@ -7,8 +7,8 @@ Python script for asynchronous RCA pipeline:
 - Batch processing with controlled concurrency
 - Optional LLM summary
 - Microsoft Teams webhook output
-- Optional ServiceDesk Plus v14720+ flow:
-  1) update solution
+- Optional ServiceDesk Plus v14720+ flow (ITSM 5W1H):
+  1) update solution (5W1H format)
   2) add exactly 1 task
   3) close that task
   4) add worklog
@@ -16,20 +16,28 @@ Python script for asynchronous RCA pipeline:
 
 ## Run
 
+Single-agent (current stable):
+
 ```bash
 python rca_full_async_stdlib.py
+```
+
+Multi-agent (OpenClaw-style roles):
+
+```bash
+python rca_multi_agent.py
 ```
 
 With input payload (request_id taken from input):
 
 ```bash
-python rca_full_async_stdlib.py --input-json input.json
+python rca_multi_agent.py --input-json input.json
 ```
 
 Override request id explicitly:
 
 ```bash
-python rca_full_async_stdlib.py --request-id 123456
+python rca_multi_agent.py --request-id 123456
 ```
 
 ## Ollama support
