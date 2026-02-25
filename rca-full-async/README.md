@@ -20,6 +20,18 @@ Python script for asynchronous RCA pipeline:
 python rca_full_async_stdlib.py
 ```
 
+With input payload (request_id taken from input):
+
+```bash
+python rca_full_async_stdlib.py --input-json input.json
+```
+
+Override request id explicitly:
+
+```bash
+python rca_full_async_stdlib.py --request-id 123456
+```
+
 ## Ollama support
 
 Yes, dùng Ollama **ok** nếu bật OpenAI-compatible API.

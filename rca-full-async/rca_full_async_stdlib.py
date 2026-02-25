@@ -17,6 +17,7 @@ import hashlib
 import asyncio
 import urllib.request
 import urllib.parse
+import argparse
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -36,7 +37,7 @@ LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
 # ServiceDesk Plus (v14720+) optional integration
 SDP_URL = os.getenv("SDP_URL", "").rstrip("/")
 SDP_TECHNICIAN_KEY = os.getenv("SDP_TECHNICIAN_KEY", "")
-SDP_REQUEST_ID = os.getenv("SDP_REQUEST_ID", "")
+SDP_REQUEST_ID = os.getenv("SDP_REQUEST_ID", "")  # fallback only
 SDP_TASK_TITLE = os.getenv("SDP_TASK_TITLE", "RCA investigation")
 SDP_TASK_OWNER = os.getenv("SDP_TASK_OWNER", "")
 SDP_RESOLUTION_PREFIX = os.getenv("SDP_RESOLUTION_PREFIX", "[AUTO RCA]")
@@ -489,7 +490,43 @@ def _extract_id(resp: Dict[str, Any], *keys: str) -> Optional[str]:
     return str(cur)
 
 
-async def run_servicedesk_plus_flow(rca_text: str) -> Optional[Dict[str, Any]]:
+def _read_json_file(path: str) -> Dict[str, Any]:
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def resolve_request_id(cli_request_id: Optional[str], input_payload: Optional[Dict[str, Any]]) -> str:
+    """
+    Priority:
+    1) --request-id CLI
+    2) input payload fields (request_id, request.id, sdp.request_id, input.request_id)
+    3) SDP_REQUEST_ID env (fallback)
+    """
+    if cli_request_id:
+        return str(cli_request_id)
+
+    p = input_payload or {}
+
+    direct = p.get("request_id")
+    if direct:
+        return str(direct)
+
+    req_obj = p.get("request") or {}
+    if isinstance(req_obj, dict) and req_obj.get("id"):
+        return str(req_obj.get("id"))
+
+    sdp_obj = p.get("sdp") or {}
+    if isinstance(sdp_obj, dict) and sdp_obj.get("request_id"):
+        return str(sdp_obj.get("request_id"))
+
+    in_obj = p.get("input") or {}
+    if isinstance(in_obj, dict) and in_obj.get("request_id"):
+        return str(in_obj.get("request_id"))
+
+    return str(SDP_REQUEST_ID or "")
+
+
+async def run_servicedesk_plus_flow(rca_text: str, request_id: str) -> Optional[Dict[str, Any]]:
     """
     v14720 flow requested:
     1) update solution
@@ -498,14 +535,14 @@ async def run_servicedesk_plus_flow(rca_text: str) -> Optional[Dict[str, Any]]:
     4) add worklog
     5) close ticket
     """
-    if not (SDP_URL and SDP_TECHNICIAN_KEY and SDP_REQUEST_ID):
+    if not (SDP_URL and SDP_TECHNICIAN_KEY and request_id):
         return None
 
     out: Dict[str, Any] = {}
 
-    out["update_solution"] = await sdp_update_solution(SDP_REQUEST_ID, rca_text)
+    out["update_solution"] = await sdp_update_solution(request_id, rca_text)
 
-    created_task = await sdp_add_single_task(SDP_REQUEST_ID, SDP_TASK_TITLE)
+    created_task = await sdp_add_single_task(request_id, SDP_TASK_TITLE)
     out["create_task"] = created_task
 
     task_id = (
@@ -515,16 +552,16 @@ async def run_servicedesk_plus_flow(rca_text: str) -> Optional[Dict[str, Any]]:
     )
 
     if task_id:
-        out["close_task"] = await sdp_close_task(SDP_REQUEST_ID, task_id)
+        out["close_task"] = await sdp_close_task(request_id, task_id)
     else:
         out["close_task"] = {"warning": "Task created but task_id not found in response; skip close_task."}
 
     out["worklog"] = await sdp_add_worklog(
-        SDP_REQUEST_ID,
+        request_id,
         "RCA automation completed: solution updated, single task handled, ticket ready to close.",
     )
 
-    out["close_ticket"] = await sdp_close_ticket(SDP_REQUEST_ID)
+    out["close_ticket"] = await sdp_close_ticket(request_id)
 
     return out
 
@@ -532,7 +569,7 @@ async def run_servicedesk_plus_flow(rca_text: str) -> Optional[Dict[str, Any]]:
 # =========================
 # Main
 # =========================
-async def main():
+async def main(cli_request_id: Optional[str] = None, input_payload: Optional[Dict[str, Any]] = None):
     try:
         z_task = asyncio.create_task(fetch_zabbix_problems())
         u_task = asyncio.create_task(fetch_uptimerobot_monitors())
@@ -542,11 +579,12 @@ async def main():
         summaries = await process_groups_batched(corr_groups)
         rca_md = await generate_rca(corr_groups, summaries)
 
-        sdp_result = await run_servicedesk_plus_flow(rca_md)
+        request_id = resolve_request_id(cli_request_id, input_payload)
+        sdp_result = await run_servicedesk_plus_flow(rca_md, request_id)
 
-        sdp_line = "- ServiceDesk Plus: skipped (missing SDP env)"
+        sdp_line = "- ServiceDesk Plus: skipped (missing SDP env/request_id)"
         if sdp_result is not None:
-            sdp_line = f"- ServiceDesk Plus: done (request_id={SDP_REQUEST_ID})"
+            sdp_line = f"- ServiceDesk Plus: done (request_id={request_id})"
 
         report = (
             f"🚨 RCA Report - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
@@ -569,4 +607,13 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description="RCA Full Async stdlib pipeline")
+    parser.add_argument("--request-id", help="ServiceDesk Plus request ID (overrides input/env)")
+    parser.add_argument("--input-json", help="Path to input JSON payload (used to extract request_id)")
+    args = parser.parse_args()
+
+    payload = None
+    if args.input_json:
+        payload = _read_json_file(args.input_json)
+
+    asyncio.run(main(cli_request_id=args.request_id, input_payload=payload))
