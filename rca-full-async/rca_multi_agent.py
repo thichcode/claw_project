@@ -15,6 +15,8 @@ import urllib.parse
 import argparse
 import re
 from datetime import datetime, timezone, timedelta
+
+LOCAL_TZ = timezone(timedelta(hours=7))  # GMT+7 (Asia/Saigon)
 from typing import Any, Dict, List, Optional
 
 # ===== Core config =====
@@ -596,7 +598,7 @@ def parse_event_time_epoch(text: Any) -> Optional[int]:
     if m:
         hh, mm, ss, yyyy, mon, dd = map(int, m.groups())
         try:
-            dt = datetime(yyyy, mon, dd, hh, mm, ss, tzinfo=timezone.utc)
+            dt = datetime(yyyy, mon, dd, hh, mm, ss, tzinfo=LOCAL_TZ)
             return int(dt.timestamp())
         except Exception:
             pass
@@ -606,7 +608,7 @@ def parse_event_time_epoch(text: Any) -> Optional[int]:
     if m:
         yyyy, mon, dd, hh, mm, ss = map(int, m.groups())
         try:
-            dt = datetime(yyyy, mon, dd, hh, mm, ss, tzinfo=timezone.utc)
+            dt = datetime(yyyy, mon, dd, hh, mm, ss, tzinfo=LOCAL_TZ)
             return int(dt.timestamp())
         except Exception:
             pass
@@ -753,7 +755,7 @@ async def send_teams(text: str):
 
 def _fmt_ts_utc(epoch: Any) -> str:
     try:
-        return datetime.fromtimestamp(int(epoch), tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        return datetime.fromtimestamp(int(epoch), tz=LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S GMT+7")
     except Exception:
         return "N/A"
 
