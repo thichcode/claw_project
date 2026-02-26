@@ -13,6 +13,7 @@ import asyncio
 import urllib.request
 import urllib.parse
 import argparse
+import re
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -465,10 +466,102 @@ def extract_task_id(resp: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def extract_sdp_ticket_id(text: Any) -> Optional[str]:
+    s = str(text or "")
+    if not s:
+        return None
+
+    patterns = [
+        r"woID=(\d+)",
+        r"/requests/(\d+)",
+        r"/workorder/(\d+)",
+        r"\brequest[_\s-]?id[\s:=]+(\d+)\b",
+        r"\bid[\s:=]+(\d{5,})\b",
+    ]
+    for pat in patterns:
+        m = re.search(pat, s, flags=re.IGNORECASE)
+        if m:
+            return m.group(1)
+    return None
+
+
+def parse_hostname_eventid_from_text(text: Any) -> Dict[str, Optional[str]]:
+    s = str(text or "")
+    out: Dict[str, Optional[str]] = {"hostname": None, "eventid": None}
+    if not s:
+        return out
+
+    m = re.search(r"([a-zA-Z0-9_.-]+)\s*[:|\s]\s*(\d{8,})", s)
+    if m:
+        out["hostname"] = m.group(1)
+        out["eventid"] = m.group(2)
+        return out
+
+    hm = re.search(r"(?:host|hostname|server|node)[\s:=]+([a-zA-Z0-9_.-]+)", s, flags=re.IGNORECASE)
+    em = re.search(r"(?:eventid|event_id|event)[\s:=]+(\d{8,})", s, flags=re.IGNORECASE)
+    if hm:
+        out["hostname"] = hm.group(1)
+    if em:
+        out["eventid"] = em.group(1)
+    return out
+
+
+def normalize_input_payload(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    p = payload or {}
+    out = dict(p)
+
+    host_val = out.get("host")
+    if isinstance(host_val, dict):
+        host_from_host = host_val.get("name") or host_val.get("host")
+    else:
+        host_from_host = host_val
+
+    event_val = out.get("event")
+    if isinstance(event_val, dict):
+        event_from_event = event_val.get("id")
+    else:
+        event_from_event = event_val
+
+    hostname = out.get("hostname") or host_from_host
+    eventid = out.get("eventid") or event_from_event
+
+    if not hostname or not eventid:
+        raw_candidates = [
+            out.get("raw_input"),
+            out.get("subject"),
+            out.get("description_text"),
+            out.get("description"),
+        ]
+        parsed = {"hostname": None, "eventid": None}
+        for rc in raw_candidates:
+            parsed = parse_hostname_eventid_from_text(rc)
+            if parsed.get("hostname") or parsed.get("eventid"):
+                break
+        hostname = hostname or parsed.get("hostname")
+        eventid = eventid or parsed.get("eventid")
+
+    if hostname:
+        out["hostname"] = str(hostname)
+    if eventid:
+        out["eventid"] = str(eventid)
+
+    # optional: map SDP id from common fields/url/text into request_id
+    rid = out.get("request_id")
+    if not rid:
+        if out.get("id") and str(out.get("id")).isdigit():
+            rid = str(out.get("id"))
+        else:
+            rid = extract_sdp_ticket_id(out.get("url")) or extract_sdp_ticket_id(out.get("raw_input"))
+    if rid:
+        out["request_id"] = str(rid)
+
+    return out
+
+
 def resolve_request_id(cli_id: Optional[str], payload: Optional[Dict[str, Any]]) -> str:
     if cli_id:
         return str(cli_id)
-    p = payload or {}
+    p = normalize_input_payload(payload)
     if p.get("request_id"):
         return str(p["request_id"])
     req = p.get("request") or {}
@@ -615,6 +708,8 @@ def pick_best_kb_id(solution_text: str, kb_entries: List[Dict[str, Any]], min_sc
 
 
 async def main(cli_request_id: Optional[str], input_payload: Optional[Dict[str, Any]]):
+    normalized_input = normalize_input_payload(input_payload)
+
     z_task = asyncio.create_task(fetch_zabbix_problems())
     u_task = asyncio.create_task(fetch_uptimerobot_monitors())
     zbx, upr = await asyncio.gather(z_task, u_task)
@@ -625,10 +720,9 @@ async def main(cli_request_id: Optional[str], input_payload: Optional[Dict[str, 
     pairs = []
     seen = set()
 
-    # allow direct input mode: only hostname + eventid provided
-    ip = input_payload or {}
-    in_hostname = ip.get("hostname") or (ip.get("host") or {}).get("name")
-    in_eventid = ip.get("eventid") or (ip.get("event") or {}).get("id")
+    # allow direct input mode: hostname/eventid can come from structured JSON or raw text/url parsing
+    in_hostname = normalized_input.get("hostname")
+    in_eventid = normalized_input.get("eventid")
     if in_hostname and in_eventid and (str(in_hostname), str(in_eventid)) not in seen:
         seen.add((str(in_hostname), str(in_eventid)))
         pairs.append((str(in_hostname), str(in_eventid)))
@@ -659,12 +753,11 @@ async def main(cli_request_id: Optional[str], input_payload: Optional[Dict[str, 
 
     # KB matching: compare generated solution text vs KB JSON entries to pick best KB id
     solution_text = build_itsm_5w1h_markdown(decision)
-    ip = input_payload or {}
-    kb_path = str(ip.get("kb_json") or ip.get("kb_path") or KB_JSON_PATH or "").strip()
+    kb_path = str(normalized_input.get("kb_json") or normalized_input.get("kb_path") or KB_JSON_PATH or "").strip()
     kb_entries = load_kb_entries(kb_path) if kb_path else []
     matched_kb_id = pick_best_kb_id(solution_text, kb_entries)
 
-    request_id = resolve_request_id(cli_request_id, input_payload)
+    request_id = resolve_request_id(cli_request_id, normalized_input)
     sdp_result = await run_sdp_flow(request_id, decision, matched_kb_id)
     sdp_done = sdp_result is not None
 
