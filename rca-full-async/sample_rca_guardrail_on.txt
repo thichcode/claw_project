@@ -1,0 +1,50 @@
+{
+  "rca": {
+    "root_cause": "Likely: transient resource contention (memory + CPU burst) triggered the alert, but current evidence is insufficient to confirm a single definitive root cause.",
+    "contributing_factors": "Cross-source correlation exists, but process-level logs and exact workload context are incomplete.",
+    "impact": "Short-lived degradation was observed; no confirmed prolonged outage, but user-facing latency or intermittent failures may have occurred.",
+    "resolution": "Initial stabilization completed. Final closure is deferred until missing evidence is collected and verified.",
+    "timeline": [
+      {
+        "time": "2026-02-26 14:53:56 UTC",
+        "event": "[T-10m] Baseline monitoring window opened before incident."
+      },
+      {
+        "time": "2026-02-26 14:55:35 UTC",
+        "event": "[T0] Primary alert fired and was correlated across monitoring sources."
+      },
+      {
+        "time": "2026-02-26 15:00:35 UTC",
+        "event": "[T+5m] Top anomalies persisted on host 10.243.16.60 (memory + CPU indicators)."
+      },
+      {
+        "time": "2026-02-26 15:05:35 UTC",
+        "event": "[T+10m] Guardrail mode ON; waiting for missing evidence before final RCA closure."
+      }
+    ],
+    "lessons_learned": "1. Correlated alerts do not always imply a single proven root cause.\n2. Confidence should be calibrated against anomaly strength and data completeness.\n3. Guardrail mode helps prevent premature closure with weak evidence.",
+    "actionable_steps_for_L1": "1. Collect process-level memory/CPU snapshots around event window.\n2. Pull application/service logs for ±10 minutes around event.\n3. Confirm workload or scheduled-job activity at incident time.\n4. Re-run RCA after attaching missing evidence.\n5. Close ticket only after verification by on-call/L2.",
+    "metadata": {
+      "confidence_calibrated": 0.41,
+      "confidence_raw": 0.58,
+      "guardrail_mode": true,
+      "missing_data": [
+        "Process-level metrics around event time",
+        "Application logs correlated with alert timestamp",
+        "Operator confirmation of remediation validation"
+      ],
+      "kb_id": "N/A",
+      "kb_match_score": 0.19,
+      "top_anomalous_host": "10.243.16.60 (0.72)",
+      "top_anomaly_keys": [
+        "vm.memory.size[pavailable] (score=0.79, trend=down)",
+        "system.cpu.util (score=0.46, trend=up)"
+      ],
+      "correlated_groups": 1,
+      "enriched_pairs": 1,
+      "sdp_done": false,
+      "request_id": null
+    }
+  },
+  "summary_markdown": "**Root Cause Analysis Summary (Guardrail ON)**\n\n- **Root Cause:** Likely: transient resource contention (memory + CPU burst), not yet definitively proven.\n- **Impact:** Short-lived degradation; no confirmed prolonged outage.\n- **Resolution:** Stabilized, but final closure pending evidence collection.\n- **Confidence (calibrated/raw):** 0.41 / 0.58\n- **Guardrail Mode:** ON\n- **Top Anomalous Host:** 10.243.16.60 (0.72)\n- **Top Anomaly Keys:**\n  1. vm.memory.size[pavailable] (score=0.79, trend=down)\n  2. system.cpu.util (score=0.46, trend=up)\n- **Timeline:**\n  1. [2026-02-26 14:53:56 UTC] [T-10m] Baseline monitoring window opened before incident.\n  2. [2026-02-26 14:55:35 UTC] [T0] Primary alert fired and was correlated across monitoring sources.\n  3. [2026-02-26 15:00:35 UTC] [T+5m] Top anomalies persisted on host 10.243.16.60 (memory + CPU indicators).\n  4. [2026-02-26 15:05:35 UTC] [T+10m] Guardrail mode ON; waiting for missing evidence before final RCA closure.\n- **Actionable Steps for L1:**\n  1. Collect process-level memory/CPU snapshots around event window.\n  2. Pull application/service logs for ±10 minutes around event.\n  3. Confirm workload or scheduled-job activity at incident time.\n  4. Re-run RCA after attaching missing evidence.\n  5. Close ticket only after verification by on-call/L2."
+}
