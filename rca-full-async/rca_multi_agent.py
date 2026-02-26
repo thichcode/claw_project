@@ -480,14 +480,19 @@ def resolve_request_id(cli_id: Optional[str], payload: Optional[Dict[str, Any]])
     return str(SDP_REQUEST_ID or "")
 
 
-async def run_sdp_flow(request_id: str, decision: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+async def run_sdp_flow(request_id: str, decision: Dict[str, Any], kb_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     if not (SDP_URL and SDP_TECHNICIAN_KEY and request_id):
         return None
 
     solution = build_itsm_5w1h_markdown(decision)
+    if kb_id:
+        solution = f"{solution}\n\n### Related Knowledge Base\n- KB ID: {kb_id}\n"
+
+    kb_note = f" Matched KB ID: {kb_id}." if kb_id else ""
     worklog = (
         "RCA multi-agent completed (ITSM 5W1H). "
         "Executed flow: update solution -> create one task -> close task -> add worklog -> close ticket."
+        + kb_note
     )
 
     out: Dict[str, Any] = {}
@@ -660,7 +665,7 @@ async def main(cli_request_id: Optional[str], input_payload: Optional[Dict[str, 
     matched_kb_id = pick_best_kb_id(solution_text, kb_entries)
 
     request_id = resolve_request_id(cli_request_id, input_payload)
-    sdp_result = await run_sdp_flow(request_id, decision)
+    sdp_result = await run_sdp_flow(request_id, decision, matched_kb_id)
     sdp_done = sdp_result is not None
 
     report = render_report(decision, len(groups), len(enrichments), sdp_done, request_id, matched_kb_id)
