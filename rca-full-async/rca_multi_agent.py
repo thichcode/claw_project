@@ -439,7 +439,8 @@ async def verifier_agent(correlation_out: Dict[str, Any], hypotheses: Dict[str, 
 async def decision_agent(collected: Dict[str, Any], correlation_out: Dict[str, Any], hypotheses: Dict[str, Any], verdicts: Dict[str, Any]) -> Dict[str, Any]:
     prompt = (
         "You are Decision Agent. Select final RCA with confidence and actions. "
-        "Return JSON with keys: root_cause, confidence, impact, evidence, immediate_actions[], preventive_actions[], "
+        "Be conservative: if evidence is weak or incomplete, return probable/likely causes and explicit missing_data[]. "
+        "Return JSON with keys: root_cause, confidence, impact, evidence, immediate_actions[], preventive_actions[], missing_data[], "
         "and itsm_5w1h={who,what,when,where,why,how}."
     )
     return await llm_json(prompt, {
@@ -759,10 +760,12 @@ def render_report(
     kb_id: Optional[str],
     enrichments: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
-    confidence = decision.get("confidence", "n/a")
+    confidence = decision.get("confidence_calibrated", decision.get("confidence", "n/a"))
+    confidence_raw = decision.get("confidence_raw", "n/a")
     root_cause = decision.get("root_cause", "N/A")
     impact = decision.get("impact", "N/A")
     kb_line = kb_id or "N/A"
+    kb_score = decision.get("kb_match_score", "n/a")
 
     top_host_line = "N/A"
     if enrichments:
@@ -781,9 +784,10 @@ def render_report(
         f"- Enriched host/event pairs: {enrichment_count}\n"
         f"- Top anomalous host: {top_host_line}\n"
         f"- Root cause: {root_cause}\n"
-        f"- Confidence: {confidence}\n"
+        f"- Confidence (calibrated/raw): {confidence} / {confidence_raw}\n"
+        f"- Guardrail mode: {'on' if decision.get('guardrail_mode') else 'off'}\n"
         f"- Impact: {impact}\n"
-        f"- KB matched id: {kb_line}\n"
+        f"- KB matched id: {kb_line} (score={kb_score})\n"
         f"- ServiceDesk Plus: {'done' if sdp_done else 'skipped'}"
         + (f" (request_id={request_id})" if sdp_done else "")
     )
@@ -825,10 +829,35 @@ def _token_set(s: Any) -> set:
     return {t for t in text.replace("\n", " ").split(" ") if len(t) >= 3}
 
 
-def pick_best_kb_id(solution_text: str, kb_entries: List[Dict[str, Any]], min_score: float = KB_MATCH_MIN_SCORE) -> Optional[str]:
+def _weighted_token_overlap(sol_tokens: set, kb: Dict[str, Any]) -> float:
+    # BM25-lite: weighted field overlap (not full BM25, but better than flat Jaccard)
+    fields = [
+        ("title", 2.5),
+        ("root_cause", 2.5),
+        ("solution", 2.2),
+        ("problem", 1.8),
+        ("summary", 1.4),
+        ("description", 1.0),
+        ("content", 0.8),
+    ]
+    score = 0.0
+    max_score = 0.0
+    for key, w in fields:
+        kb_tokens = _token_set(kb.get(key))
+        if not kb_tokens:
+            continue
+        overlap = len(sol_tokens & kb_tokens)
+        union = len(sol_tokens | kb_tokens)
+        s = overlap / max(1, union)
+        score += s * w
+        max_score += w
+    return (score / max_score) if max_score > 0 else 0.0
+
+
+def pick_best_kb_match(solution_text: str, kb_entries: List[Dict[str, Any]], min_score: float = KB_MATCH_MIN_SCORE) -> Dict[str, Any]:
     sol_tokens = _token_set(solution_text)
     if not sol_tokens:
-        return None
+        return {"id": None, "score": 0.0}
 
     best_id: Optional[str] = None
     best_score = 0.0
@@ -837,27 +866,101 @@ def pick_best_kb_id(solution_text: str, kb_entries: List[Dict[str, Any]], min_sc
         kb_id = kb.get("id") or kb.get("kb_id") or kb.get("article_id") or kb.get("knowledge_id")
         if not kb_id:
             continue
-
-        kb_text = " ".join([
-            str(kb.get("title") or ""),
-            str(kb.get("summary") or ""),
-            str(kb.get("problem") or ""),
-            str(kb.get("root_cause") or ""),
-            str(kb.get("solution") or ""),
-            str(kb.get("content") or ""),
-            str(kb.get("description") or ""),
-        ])
-        kb_tokens = _token_set(kb_text)
-        if not kb_tokens:
-            continue
-
-        overlap = len(sol_tokens & kb_tokens)
-        score = overlap / max(1, len(sol_tokens | kb_tokens))
+        score = _weighted_token_overlap(sol_tokens, kb)
         if score > best_score:
             best_score = score
             best_id = str(kb_id)
 
-    return best_id if best_score >= min_score else None
+    if best_score < min_score:
+        return {"id": None, "score": round(best_score, 4)}
+    return {"id": best_id, "score": round(best_score, 4)}
+
+
+def pick_best_kb_id(solution_text: str, kb_entries: List[Dict[str, Any]], min_score: float = KB_MATCH_MIN_SCORE) -> Optional[str]:
+    return pick_best_kb_match(solution_text, kb_entries, min_score).get("id")
+
+
+def _safe_float(v: Any, default: float = 0.0) -> float:
+    try:
+        return float(v)
+    except Exception:
+        return default
+
+
+def calibrate_confidence(decision: Dict[str, Any], groups: List[Dict[str, Any]], enrichments: List[Dict[str, Any]]) -> Dict[str, float]:
+    llm_conf = _safe_float(decision.get("confidence"), 0.5)
+    llm_conf = max(0.0, min(1.0, llm_conf))
+
+    anomaly = 0.0
+    if enrichments:
+        anomaly = max((_safe_float(e.get("host_anomaly_score"), 0.0) for e in enrichments if isinstance(e, dict)), default=0.0)
+        anomaly = max(0.0, min(1.0, anomaly))
+
+    matched = 0
+    for g in groups:
+        if (g.get("matched_uptime") or []):
+            matched += 1
+    corr_density = (matched / max(1, len(groups))) if groups else 0.0
+
+    completeness_signals = [
+        1.0 if groups else 0.0,
+        1.0 if enrichments else 0.0,
+        1.0 if decision.get("evidence") else 0.0,
+        1.0 if decision.get("root_cause") else 0.0,
+        1.0 if decision.get("itsm_5w1h") else 0.0,
+    ]
+    completeness = sum(completeness_signals) / len(completeness_signals)
+
+    calibrated = (llm_conf * 0.4) + (anomaly * 0.25) + (corr_density * 0.2) + (completeness * 0.15)
+    calibrated = max(0.0, min(1.0, calibrated))
+
+    return {
+        "llm_conf": round(llm_conf, 4),
+        "anomaly": round(anomaly, 4),
+        "corr_density": round(corr_density, 4),
+        "completeness": round(completeness, 4),
+        "calibrated": round(calibrated, 4),
+    }
+
+
+def apply_guardrail(decision: Dict[str, Any], conf_meta: Dict[str, float]) -> Dict[str, Any]:
+    calibrated = conf_meta.get("calibrated", 0.0)
+    completeness = conf_meta.get("completeness", 0.0)
+    guardrail_on = calibrated < 0.45 or completeness < 0.35
+
+    out = dict(decision)
+    out["confidence_raw"] = conf_meta.get("llm_conf")
+    out["confidence"] = conf_meta.get("calibrated")
+    out["confidence_calibrated"] = conf_meta.get("calibrated")
+    out["guardrail_mode"] = guardrail_on
+
+    if guardrail_on:
+        rc = str(out.get("root_cause") or "Insufficient evidence for definitive root cause")
+        if not rc.lower().startswith("likely"):
+            out["root_cause"] = f"Likely: {rc}"
+
+        missing = out.get("missing_data")
+        if not isinstance(missing, list):
+            missing = []
+        needed = [
+            "Additional host metrics around incident window",
+            "Application/service logs correlated with alert time",
+            "Verification from on-call/operator confirmation",
+        ]
+        for n in needed:
+            if n not in missing:
+                missing.append(n)
+        out["missing_data"] = missing
+
+        immediate = out.get("immediate_actions")
+        if not isinstance(immediate, list):
+            immediate = [str(immediate)] if immediate else []
+        extra = "Collect missing data above before final root-cause closure."
+        if extra not in immediate:
+            immediate.append(extra)
+        out["immediate_actions"] = immediate
+
+    return out
 
 
 async def main(cli_request_id: Optional[str], input_payload: Optional[Dict[str, Any]]):
@@ -904,13 +1007,19 @@ async def main(cli_request_id: Optional[str], input_payload: Optional[Dict[str, 
     hypotheses = await hypothesis_agent(corr_out)
     verifier = await verifier_agent(corr_out, hypotheses)
 
-    decision = await decision_agent(collected, corr_out, hypotheses, verifier)
+    decision_raw = await decision_agent(collected, corr_out, hypotheses, verifier)
+
+    # Confidence calibration + guardrail (anti overconfident RCA when data is weak)
+    conf_meta = calibrate_confidence(decision_raw, groups, enrichments)
+    decision = apply_guardrail(decision_raw, conf_meta)
 
     # KB matching: compare generated solution text vs KB JSON entries to pick best KB id
     solution_text = build_itsm_5w1h_markdown(decision)
     kb_path = str(normalized_input.get("kb_json") or normalized_input.get("kb_path") or KB_JSON_PATH or "").strip()
     kb_entries = load_kb_entries(kb_path) if kb_path else []
-    matched_kb_id = pick_best_kb_id(solution_text, kb_entries)
+    kb_match = pick_best_kb_match(solution_text, kb_entries)
+    matched_kb_id = kb_match.get("id")
+    decision["kb_match_score"] = kb_match.get("score")
 
     request_id = resolve_request_id(cli_request_id, normalized_input)
     sdp_result = await run_sdp_flow(request_id, decision, matched_kb_id)
