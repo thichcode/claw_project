@@ -762,12 +762,17 @@ def render_report(
 ) -> str:
     confidence = decision.get("confidence_calibrated", decision.get("confidence", "n/a"))
     confidence_raw = decision.get("confidence_raw", "n/a")
-    root_cause = decision.get("root_cause", "N/A")
-    impact = decision.get("impact", "N/A")
+    root_cause = str(decision.get("root_cause", "N/A"))
+    impact = str(decision.get("impact", "N/A"))
+    evidence = decision.get("evidence") or []
+    immediate = decision.get("immediate_actions") or []
+    preventive = decision.get("preventive_actions") or []
+    missing = decision.get("missing_data") or []
     kb_line = kb_id or "N/A"
     kb_score = decision.get("kb_match_score", "n/a")
 
     top_host_line = "N/A"
+    top_anomaly_keys: List[str] = []
     if enrichments:
         ranked = sorted(
             [e for e in enrichments if isinstance(e, dict)],
@@ -777,20 +782,80 @@ def render_report(
         if ranked:
             top = ranked[0]
             top_host_line = f"{top.get('hostname') or 'unknown'} ({top.get('host_anomaly_score', 0)})"
+            for a in (top.get("anomalies") or [])[:3]:
+                if isinstance(a, dict):
+                    key = a.get("key") or a.get("name") or "unknown"
+                    score = a.get("anomaly_score", "n/a")
+                    trend = a.get("trend", "n/a")
+                    top_anomaly_keys.append(f"{key} (score={score}, trend={trend})")
 
-    return (
-        f"🚨 RCA Multi-Agent Report - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-        f"- Correlated groups: {groups_count}\n"
-        f"- Enriched host/event pairs: {enrichment_count}\n"
-        f"- Top anomalous host: {top_host_line}\n"
-        f"- Root cause: {root_cause}\n"
-        f"- Confidence (calibrated/raw): {confidence} / {confidence_raw}\n"
-        f"- Guardrail mode: {'on' if decision.get('guardrail_mode') else 'off'}\n"
-        f"- Impact: {impact}\n"
-        f"- KB matched id: {kb_line} (score={kb_score})\n"
-        f"- ServiceDesk Plus: {'done' if sdp_done else 'skipped'}"
-        + (f" (request_id={request_id})" if sdp_done else "")
-    )
+    resolution = "Automated remediation flow executed (SDP update/task/worklog/closure)." if sdp_done else "Investigation completed; remediation pending ticket workflow execution."
+    contributing = "Correlated cross-source signals and anomaly trends were used to identify probable factors."
+
+    lessons = []
+    if top_anomaly_keys:
+        lessons.append("High-variance metric keys should be prioritized in first-response triage.")
+    lessons.append("Use correlation window + host anomaly score to reduce false positives.")
+    lessons.append("Attach KB and missing-data checklist to speed up L1/L2 handoff.")
+
+    actionable = []
+    actionable.extend([str(x) for x in immediate if str(x).strip()])
+    actionable.extend([str(x) for x in preventive if str(x).strip()])
+    for m in missing:
+        actionable.append(f"Collect: {m}")
+    if not actionable:
+        actionable = ["Review host metrics/logs around incident time and confirm probable root cause."]
+
+    rca_obj = {
+        "root_cause": root_cause,
+        "contributing_factors": contributing,
+        "impact": impact,
+        "resolution": resolution,
+        "lessons_learned": "\n".join([f"{i+1}. {x}" for i, x in enumerate(lessons)]),
+        "actionable_steps_for_L1": "\n".join([f"{i+1}. {x}" for i, x in enumerate(actionable[:8])]),
+        "metadata": {
+            "confidence_calibrated": confidence,
+            "confidence_raw": confidence_raw,
+            "guardrail_mode": bool(decision.get("guardrail_mode")),
+            "kb_id": kb_line,
+            "kb_match_score": kb_score,
+            "top_anomalous_host": top_host_line,
+            "top_anomaly_keys": top_anomaly_keys,
+            "correlated_groups": groups_count,
+            "enriched_pairs": enrichment_count,
+            "sdp_done": sdp_done,
+            "request_id": request_id if sdp_done else None,
+        },
+    }
+
+    md_lines = [
+        "**Root Cause Analysis Summary**",
+        "",
+        f"- **Root Cause:** {root_cause}",
+        f"- **Impact:** {impact}",
+        f"- **Resolution:** {resolution}",
+        f"- **Confidence (calibrated/raw):** {confidence} / {confidence_raw}",
+        f"- **Top Anomalous Host:** {top_host_line}",
+        f"- **KB Matched ID:** {kb_line} (score={kb_score})",
+    ]
+    if top_anomaly_keys:
+        md_lines.append("- **Top Anomaly Keys:**")
+        for i, k in enumerate(top_anomaly_keys, 1):
+            md_lines.append(f"  {i}. {k}")
+    if evidence:
+        md_lines.append("- **Evidence:**")
+        ev = evidence if isinstance(evidence, list) else [evidence]
+        for i, e in enumerate(ev[:5], 1):
+            md_lines.append(f"  {i}. {e}")
+    md_lines.append("- **Actionable Steps for L1:**")
+    for i, a in enumerate(actionable[:8], 1):
+        md_lines.append(f"  {i}. {a}")
+
+    report_obj = {
+        "rca": rca_obj,
+        "summary_markdown": "\n".join(md_lines),
+    }
+    return json.dumps(report_obj, ensure_ascii=False, indent=2)
 
 
 def read_json(path: str) -> Dict[str, Any]:
