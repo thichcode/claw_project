@@ -1,0 +1,37 @@
+{
+  "rca": {
+    "root_cause": "A temporary spike in memory usage by a short‑lived process caused the available memory to drop below 5% and triggered the alert. The process terminated within minutes, freeing memory and restoring normal conditions.",
+    "contributing_factors": "No significant contributing factors were identified. Disk I/O, network, and SSH metrics remained stable, and there was no evidence of a memory leak or kernel fragmentation event.",
+    "impact": "The alert was triggered for a brief period (~5 minutes). No application downtime or data loss was reported, but the low memory condition could have caused performance degradation or unresponsiveness if not resolved quickly.",
+    "resolution": "The offending process terminated, freeing memory. The system returned to normal operation and the Zabbix trigger resolved automatically.",
+    "timeline": [
+      {
+        "time": "2026-02-26 14:53:56 UTC",
+        "event": "CPU load spike detected"
+      },
+      {
+        "time": "2026-02-26 14:55:35 UTC",
+        "event": "SSH service down"
+      },
+      {
+        "time": "2026-02-26 14:56:08 UTC",
+        "event": "Ping loss reached 100%"
+      },
+      {
+        "time": "2026-02-26 14:59:05 UTC",
+        "event": "SSH service recovered"
+      },
+      {
+        "time": "2026-02-26 15:00:38 UTC",
+        "event": "Host restart initiated"
+      },
+      {
+        "time": "2026-02-26 15:01:46 UTC",
+        "event": "Host restart completed and alert resolved"
+      }
+    ],
+    "lessons_learned": "1. Short-lived processes can cause transient memory spikes that trigger alerts.\n2. Current memory thresholds are sensitive to brief spikes; consider adding hysteresis or smoothing.\n3. Monitoring should include process-level memory usage to identify such spikes early.\n4. Review application logs around the incident time to identify the process and its purpose.",
+    "actionable_steps_for_L1": "1. Verify the process that caused the spike by checking `ps aux --sort=-%mem` around 15:49Z.\n2. Inspect application logs for any scheduled tasks or background jobs that ran at that time.\n3. If the process is legitimate, consider adjusting its start time or resource limits.\n4. Update the Zabbix memory trigger to use a 5-minute moving average or add a hysteresis threshold to avoid false positives.\n5. Document the incident and the process identified for future reference."
+  },
+  "summary_markdown": "**Root Cause Analysis Summary**\n\n- **Root Cause:** A short-lived process temporarily consumed a large portion of RAM, dropping available memory below 5% and triggering the Zabbix alert.\n- **Impact:** The alert lasted ~5 minutes; no service interruption was observed.\n- **Resolution:** The process terminated, memory was freed, and the alert cleared automatically.\n- **Timeline:**\n  1. [2026-02-26 14:53:56 UTC] CPU load spike detected\n  2. [2026-02-26 14:55:35 UTC] SSH service down\n  3. [2026-02-26 14:56:08 UTC] Ping loss reached 100%\n  4. [2026-02-26 14:59:05 UTC] SSH service recovered\n  5. [2026-02-26 15:00:38 UTC] Host restart initiated\n  6. [2026-02-26 15:01:46 UTC] Host restart completed and alert resolved\n- **Lessons Learned:**\n  1. Transient memory spikes can trigger alerts even when overall system health is fine.\n  2. Current thresholds lack hysteresis; adding smoothing can reduce false positives.\n  3. Process-level monitoring is essential to identify such spikes.\n- **Actionable Steps for L1:**\n  1. Identify the process that caused the spike.\n  2. Review its logs and schedule.\n  3. Adjust thresholds or process limits if necessary.\n  4. Update monitoring configuration to include hysteresis.\n  5. Record findings for future incidents."
+}
