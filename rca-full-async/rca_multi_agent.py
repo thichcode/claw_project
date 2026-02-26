@@ -757,15 +757,29 @@ def render_report(
     sdp_done: bool,
     request_id: str,
     kb_id: Optional[str],
+    enrichments: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     confidence = decision.get("confidence", "n/a")
     root_cause = decision.get("root_cause", "N/A")
     impact = decision.get("impact", "N/A")
     kb_line = kb_id or "N/A"
+
+    top_host_line = "N/A"
+    if enrichments:
+        ranked = sorted(
+            [e for e in enrichments if isinstance(e, dict)],
+            key=lambda x: (x.get("host_anomaly_score") or 0),
+            reverse=True,
+        )
+        if ranked:
+            top = ranked[0]
+            top_host_line = f"{top.get('hostname') or 'unknown'} ({top.get('host_anomaly_score', 0)})"
+
     return (
         f"🚨 RCA Multi-Agent Report - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
         f"- Correlated groups: {groups_count}\n"
         f"- Enriched host/event pairs: {enrichment_count}\n"
+        f"- Top anomalous host: {top_host_line}\n"
         f"- Root cause: {root_cause}\n"
         f"- Confidence: {confidence}\n"
         f"- Impact: {impact}\n"
@@ -902,7 +916,7 @@ async def main(cli_request_id: Optional[str], input_payload: Optional[Dict[str, 
     sdp_result = await run_sdp_flow(request_id, decision, matched_kb_id)
     sdp_done = sdp_result is not None
 
-    report = render_report(decision, len(groups), len(enrichments), sdp_done, request_id, matched_kb_id)
+    report = render_report(decision, len(groups), len(enrichments), sdp_done, request_id, matched_kb_id, enrichments)
     await send_teams(report)
 
     print("[OK] Multi-agent RCA complete")
