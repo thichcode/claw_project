@@ -253,18 +253,54 @@ async def zabbix_item_history(itemid: str, value_type: int, time_from: int, time
 
 def summarize_series(points: List[float]) -> Dict[str, Any]:
     if not points:
-        return {"count": 0, "latest": None, "min": None, "max": None, "avg": None, "delta": None}
+        return {
+            "count": 0,
+            "latest": None,
+            "first": None,
+            "min": None,
+            "max": None,
+            "avg": None,
+            "delta": None,
+            "change": None,
+            "trend": "unknown",
+            "volatility": None,
+            "anomaly_score": 0.0,
+        }
+
     mn = min(points)
     mx = max(points)
     avg = sum(points) / len(points)
     latest = points[-1]
+    first = points[0]
+    delta = mx - mn
+    change = latest - first
+
+    trend = "stable"
+    if change > 0:
+        trend = "up"
+    elif change < 0:
+        trend = "down"
+
+    volatility = (delta / abs(avg)) if avg not in (0, None) else (delta if delta is not None else 0)
+    change_ratio = (abs(change) / abs(first)) if first not in (0, None) else abs(change)
+
+    # Simple anomaly score in [0,1] from movement + volatility
+    movement = min(1.0, float(change_ratio) if isinstance(change_ratio, (int, float)) else 0.0)
+    vol = min(1.0, float(volatility) if isinstance(volatility, (int, float)) else 0.0)
+    anomaly_score = round((movement * 0.6 + vol * 0.4), 4)
+
     return {
         "count": len(points),
         "latest": latest,
+        "first": first,
         "min": mn,
         "max": mx,
         "avg": avg,
-        "delta": mx - mn,
+        "delta": delta,
+        "change": change,
+        "trend": trend,
+        "volatility": volatility,
+        "anomaly_score": anomaly_score,
     }
 
 
@@ -320,14 +356,36 @@ async def zabbix_enrich_from_hostname_eventid(
             }
 
     metric_rows = [m for m in await asyncio.gather(*(one_item(i) for i in items)) if m is not None]
-    metric_rows.sort(key=lambda x: (x.get("summary", {}).get("delta") or 0), reverse=True)
+    metric_rows.sort(key=lambda x: (x.get("summary", {}).get("anomaly_score") or 0), reverse=True)
+
+    top_metrics = metric_rows[:ENRICH_TOP_N_ITEMS]
+    anomalies = []
+    for m in top_metrics:
+        s = m.get("summary") or {}
+        if (s.get("anomaly_score") or 0) >= 0.35:
+            anomalies.append({
+                "key": m.get("key"),
+                "name": m.get("name"),
+                "trend": s.get("trend"),
+                "anomaly_score": s.get("anomaly_score"),
+                "latest": s.get("latest"),
+                "avg": s.get("avg"),
+                "delta": s.get("delta"),
+            })
+
+    host_anomaly_score = 0.0
+    if top_metrics:
+        scores = [(x.get("summary", {}).get("anomaly_score") or 0.0) for x in top_metrics]
+        host_anomaly_score = round(sum(scores) / len(scores), 4)
 
     return {
         "hostname": hostname,
         "eventid": eventid,
         "event_clock": event_clock,
         "window": {"from": time_from, "till": time_till},
-        "metrics": metric_rows[:ENRICH_TOP_N_ITEMS],
+        "host_anomaly_score": host_anomaly_score,
+        "anomalies": anomalies,
+        "metrics": top_metrics,
     }
 
 
@@ -355,7 +413,11 @@ async def llm_json(system_prompt: str, user_payload: Dict[str, Any]) -> Dict[str
 
 
 async def collector_agent(groups: List[Dict[str, Any]], enrichments: List[Dict[str, Any]]) -> Dict[str, Any]:
-    prompt = "You are Collector Agent. Normalize incidents + enrichment signals and produce compact timeline. Return JSON with timeline[] and key_entities[] and top_signals[]."
+    prompt = (
+        "You are Collector Agent. Normalize incidents + enrichment signals and produce compact timeline. "
+        "Use trend/anomaly fields from enrichment (trend, anomaly_score, host_anomaly_score, anomalies[]) "
+        "to rank top signals. Return JSON with timeline[], key_entities[], top_signals[], anomaly_summary[]."
+    )
     return await llm_json(prompt, {"groups": groups, "enrichments": enrichments})
 
 
