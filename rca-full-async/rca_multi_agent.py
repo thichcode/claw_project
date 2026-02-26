@@ -758,8 +758,8 @@ def _fmt_ts_utc(epoch: Any) -> str:
         return "N/A"
 
 
-def build_event_timeline(groups: List[Dict[str, Any]], enrichments: Optional[List[Dict[str, Any]]], decision: Dict[str, Any]) -> List[str]:
-    lines: List[str] = []
+def build_event_timeline(groups: List[Dict[str, Any]], enrichments: Optional[List[Dict[str, Any]]], decision: Dict[str, Any]) -> List[Dict[str, str]]:
+    lines: List[Dict[str, str]] = []
 
     # Pick earliest correlated event as anchor
     anchor_ts: Optional[int] = None
@@ -781,9 +781,9 @@ def build_event_timeline(groups: List[Dict[str, Any]], enrichments: Optional[Lis
         after_5 = anchor_ts + 300
         after_10 = anchor_ts + 600
 
-        lines.append(f"T-10m ({_fmt_ts_utc(before_10)}): baseline monitoring window before incident on host {anchor_host}.")
-        lines.append(f"T-5m ({_fmt_ts_utc(before_5)}): early anomaly signs may appear on key metrics (cpu/memory/disk/network).")
-        lines.append(f"T0 ({_fmt_ts_utc(anchor_ts)}): primary alert event detected and correlated.")
+        lines.append({"time": _fmt_ts_utc(before_10), "event": f"[T-10m] Baseline monitoring window before incident on host {anchor_host}."})
+        lines.append({"time": _fmt_ts_utc(before_5), "event": "[T-5m] Early anomaly signs may appear on key metrics (cpu/memory/disk/network)."})
+        lines.append({"time": _fmt_ts_utc(anchor_ts), "event": "[T0] Primary alert event detected and correlated."})
 
         # Add top anomalies around event
         if enrichments:
@@ -798,16 +798,16 @@ def build_event_timeline(groups: List[Dict[str, Any]], enrichments: Optional[Lis
                 an = top.get("anomalies") or []
                 if an:
                     keys = ", ".join(str((x.get("key") or x.get("name") or "unknown")) for x in an[:3])
-                    lines.append(f"T+5m ({_fmt_ts_utc(after_5)}): top anomaly host={host}; hot metrics: {keys}.")
+                    lines.append({"time": _fmt_ts_utc(after_5), "event": f"[T+5m] Top anomaly host={host}; hot metrics: {keys}."})
                 else:
-                    lines.append(f"T+5m ({_fmt_ts_utc(after_5)}): anomaly score remains elevated on host={host}.")
+                    lines.append({"time": _fmt_ts_utc(after_5), "event": f"[T+5m] Anomaly score remains elevated on host={host}."})
 
         if decision.get("guardrail_mode"):
-            lines.append(f"T+10m ({_fmt_ts_utc(after_10)}): guardrail mode ON, awaiting missing evidence before final closure.")
+            lines.append({"time": _fmt_ts_utc(after_10), "event": "[T+10m] Guardrail mode ON, awaiting missing evidence before final closure."})
         else:
-            lines.append(f"T+10m ({_fmt_ts_utc(after_10)}): remediation steps validated, incident trends moving toward stable.")
+            lines.append({"time": _fmt_ts_utc(after_10), "event": "[T+10m] Remediation steps validated, incident trends moving toward stable."})
     else:
-        lines.append("Timeline unavailable: no correlated event timestamp found.")
+        lines.append({"time": "N/A", "event": "Timeline unavailable: no correlated event timestamp found."})
 
     return lines
 
@@ -875,7 +875,7 @@ def render_report(
         "contributing_factors": contributing,
         "impact": impact,
         "resolution": resolution,
-        "timeline_before_after_event": "\n".join([f"{i+1}. {x}" for i, x in enumerate(timeline_lines)]),
+        "timeline": timeline_lines,
         "lessons_learned": "\n".join([f"{i+1}. {x}" for i, x in enumerate(lessons)]),
         "actionable_steps_for_L1": "\n".join([f"{i+1}. {x}" for i, x in enumerate(actionable[:8])]),
         "metadata": {
@@ -914,7 +914,7 @@ def render_report(
             md_lines.append(f"  {i}. {e}")
     md_lines.append("- **Timeline (Before/After Event):**")
     for i, t in enumerate(timeline_lines, 1):
-        md_lines.append(f"  {i}. {t}")
+        md_lines.append(f"  {i}. [{t.get('time','N/A')}] {t.get('event','')}")
     md_lines.append("- **Actionable Steps for L1:**")
     for i, a in enumerate(actionable[:8], 1):
         md_lines.append(f"  {i}. {a}")
