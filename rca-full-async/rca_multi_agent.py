@@ -268,18 +268,30 @@ def summarize_series(points: List[float]) -> Dict[str, Any]:
     }
 
 
-async def zabbix_enrich_from_hostname_eventid(hostname: str, eventid: str) -> Dict[str, Any]:
+async def zabbix_enrich_from_hostname_eventid(
+    hostname: str,
+    eventid: str,
+    explicit_window: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Best-effort enrichment for CPU/mem/disk/net/process/log(+k8s/docker/mysql keys if present)."""
     if not (hostname and eventid and ZABBIX_URL and ZABBIX_TOKEN):
         return {"hostname": hostname, "eventid": eventid, "metrics": [], "note": "missing inputs or zabbix creds"}
 
     hostid = await zabbix_hostid_from_hostname(hostname)
     event_clock = await zabbix_event_clock(eventid)
-    if not hostid or not event_clock:
-        return {"hostname": hostname, "eventid": eventid, "metrics": [], "note": "hostid/event_clock not found"}
+    if not hostid:
+        return {"hostname": hostname, "eventid": eventid, "metrics": [], "note": "hostid not found"}
 
-    time_till = event_clock + TIME_WINDOW_SEC
-    time_from = event_clock - (ENRICH_LOOKBACK_MINUTES * 60)
+    if explicit_window and explicit_window.get("from") and explicit_window.get("till"):
+        time_from = int(explicit_window["from"])
+        time_till = int(explicit_window["till"])
+        if not event_clock:
+            event_clock = (time_from + time_till) // 2
+    else:
+        if not event_clock:
+            return {"hostname": hostname, "eventid": eventid, "metrics": [], "note": "event_clock not found"}
+        time_till = event_clock + TIME_WINDOW_SEC
+        time_from = event_clock - (ENRICH_LOOKBACK_MINUTES * 60)
 
     items = await zabbix_item_candidates(hostid)
     sem = asyncio.Semaphore(MAX_CONCURRENCY)
@@ -497,13 +509,57 @@ def parse_hostname_eventid_from_text(text: Any) -> Dict[str, Optional[str]]:
         out["eventid"] = m.group(2)
         return out
 
+    # support: hostname:10.243.16.60 ... eventid:1312158100
+    hm_ip = re.search(r"hostname\s*[:=]\s*((?:\d{1,3}\.){3}\d{1,3}|[a-zA-Z0-9_.-]+)", s, flags=re.IGNORECASE)
+    if hm_ip:
+        out["hostname"] = hm_ip.group(1)
+
     hm = re.search(r"(?:host|hostname|server|node)[\s:=]+([a-zA-Z0-9_.-]+)", s, flags=re.IGNORECASE)
     em = re.search(r"(?:eventid|event_id|event)[\s:=]+(\d{8,})", s, flags=re.IGNORECASE)
-    if hm:
+    if hm and not out.get("hostname"):
         out["hostname"] = hm.group(1)
     if em:
         out["eventid"] = em.group(1)
     return out
+
+
+def parse_event_time_epoch(text: Any) -> Optional[int]:
+    s = str(text or "")
+    if not s:
+        return None
+
+    # Format: Last check: 15:49:03/2026.02.26
+    m = re.search(r"(\d{2}):(\d{2}):(\d{2})\/(\d{4})\.(\d{2})\.(\d{2})", s)
+    if m:
+        hh, mm, ss, yyyy, mon, dd = map(int, m.groups())
+        try:
+            dt = datetime(yyyy, mon, dd, hh, mm, ss, tzinfo=timezone.utc)
+            return int(dt.timestamp())
+        except Exception:
+            pass
+
+    # Format: 2026-02-26 15:49:03
+    m = re.search(r"(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})", s)
+    if m:
+        yyyy, mon, dd, hh, mm, ss = map(int, m.groups())
+        try:
+            dt = datetime(yyyy, mon, dd, hh, mm, ss, tzinfo=timezone.utc)
+            return int(dt.timestamp())
+        except Exception:
+            pass
+
+    return None
+
+
+def build_time_window(event_epoch: int, window_minutes: int = TIME_WINDOW_MINUTES) -> Dict[str, Any]:
+    delta = window_minutes * 60
+    t_from = int(event_epoch) - delta
+    t_till = int(event_epoch) + delta
+    return {
+        "from": t_from,
+        "till": t_till,
+        "window_min": window_minutes,
+    }
 
 
 def normalize_input_payload(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -545,15 +601,36 @@ def normalize_input_payload(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]
     if eventid:
         out["eventid"] = str(eventid)
 
-    # optional: map SDP id from common fields/url/text into request_id
-    rid = out.get("request_id")
-    if not rid:
+    # optional: keep explicit sdp_ticket_id and map into request_id
+    sdp_ticket_id = out.get("sdp_ticket_id")
+    if not sdp_ticket_id:
         if out.get("id") and str(out.get("id")).isdigit():
-            rid = str(out.get("id"))
+            sdp_ticket_id = str(out.get("id"))
         else:
-            rid = extract_sdp_ticket_id(out.get("url")) or extract_sdp_ticket_id(out.get("raw_input"))
+            sdp_ticket_id = (
+                extract_sdp_ticket_id(out.get("url"))
+                or extract_sdp_ticket_id(out.get("raw_input"))
+                or extract_sdp_ticket_id(out.get("subject"))
+                or extract_sdp_ticket_id(out.get("description_text"))
+                or extract_sdp_ticket_id(out.get("description"))
+            )
+    if sdp_ticket_id:
+        out["sdp_ticket_id"] = str(sdp_ticket_id)
+
+    rid = out.get("request_id") or out.get("sdp_ticket_id")
     if rid:
         out["request_id"] = str(rid)
+
+    # derive event time + explicit time window for enrichment (if present in text)
+    evt_epoch = (
+        out.get("event_time_epoch")
+        or parse_event_time_epoch(out.get("description_text"))
+        or parse_event_time_epoch(out.get("description"))
+        or parse_event_time_epoch(out.get("raw_input"))
+    )
+    if evt_epoch:
+        out["event_time_epoch"] = int(evt_epoch)
+        out["time_window"] = build_time_window(int(evt_epoch), TIME_WINDOW_MINUTES)
 
     return out
 
@@ -736,9 +813,11 @@ async def main(cli_request_id: Optional[str], input_payload: Optional[Dict[str, 
 
     sem = asyncio.Semaphore(MAX_CONCURRENCY)
 
+    explicit_window = normalized_input.get("time_window") if isinstance(normalized_input.get("time_window"), dict) else None
+
     async def enrich_one(hostname: str, eventid: str) -> Dict[str, Any]:
         async with sem:
-            return await zabbix_enrich_from_hostname_eventid(hostname, eventid)
+            return await zabbix_enrich_from_hostname_eventid(hostname, eventid, explicit_window)
 
     enrichments = await asyncio.gather(*(enrich_one(h, e) for h, e in pairs)) if pairs else []
 
