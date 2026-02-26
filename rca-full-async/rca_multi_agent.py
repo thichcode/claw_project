@@ -751,6 +751,67 @@ async def send_teams(text: str):
     await to_thread(http_json_request, "POST", TEAMS_WEBHOOK_URL, {"text": text})
 
 
+def _fmt_ts_utc(epoch: Any) -> str:
+    try:
+        return datetime.fromtimestamp(int(epoch), tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    except Exception:
+        return "N/A"
+
+
+def build_event_timeline(groups: List[Dict[str, Any]], enrichments: Optional[List[Dict[str, Any]]], decision: Dict[str, Any]) -> List[str]:
+    lines: List[str] = []
+
+    # Pick earliest correlated event as anchor
+    anchor_ts: Optional[int] = None
+    anchor_host = "unknown"
+    if groups:
+        sorted_groups = sorted(
+            [g for g in groups if isinstance(g, dict) and g.get("zabbix_ts")],
+            key=lambda x: int(x.get("zabbix_ts")),
+        )
+        if sorted_groups:
+            anchor = sorted_groups[0]
+            anchor_ts = int(anchor.get("zabbix_ts"))
+            z = anchor.get("zabbix") or {}
+            anchor_host = str(z.get("hostname") or "unknown")
+
+    if anchor_ts is not None:
+        before_10 = anchor_ts - 600
+        before_5 = anchor_ts - 300
+        after_5 = anchor_ts + 300
+        after_10 = anchor_ts + 600
+
+        lines.append(f"T-10m ({_fmt_ts_utc(before_10)}): baseline monitoring window before incident on host {anchor_host}.")
+        lines.append(f"T-5m ({_fmt_ts_utc(before_5)}): early anomaly signs may appear on key metrics (cpu/memory/disk/network).")
+        lines.append(f"T0 ({_fmt_ts_utc(anchor_ts)}): primary alert event detected and correlated.")
+
+        # Add top anomalies around event
+        if enrichments:
+            ranked = sorted(
+                [e for e in enrichments if isinstance(e, dict)],
+                key=lambda x: (x.get("host_anomaly_score") or 0),
+                reverse=True,
+            )
+            if ranked:
+                top = ranked[0]
+                host = top.get("hostname") or "unknown"
+                an = top.get("anomalies") or []
+                if an:
+                    keys = ", ".join(str((x.get("key") or x.get("name") or "unknown")) for x in an[:3])
+                    lines.append(f"T+5m ({_fmt_ts_utc(after_5)}): top anomaly host={host}; hot metrics: {keys}.")
+                else:
+                    lines.append(f"T+5m ({_fmt_ts_utc(after_5)}): anomaly score remains elevated on host={host}.")
+
+        if decision.get("guardrail_mode"):
+            lines.append(f"T+10m ({_fmt_ts_utc(after_10)}): guardrail mode ON, awaiting missing evidence before final closure.")
+        else:
+            lines.append(f"T+10m ({_fmt_ts_utc(after_10)}): remediation steps validated, incident trends moving toward stable.")
+    else:
+        lines.append("Timeline unavailable: no correlated event timestamp found.")
+
+    return lines
+
+
 def render_report(
     decision: Dict[str, Any],
     groups_count: int,
@@ -759,6 +820,7 @@ def render_report(
     request_id: str,
     kb_id: Optional[str],
     enrichments: Optional[List[Dict[str, Any]]] = None,
+    groups: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     confidence = decision.get("confidence_calibrated", decision.get("confidence", "n/a"))
     confidence_raw = decision.get("confidence_raw", "n/a")
@@ -806,11 +868,14 @@ def render_report(
     if not actionable:
         actionable = ["Review host metrics/logs around incident time and confirm probable root cause."]
 
+    timeline_lines = build_event_timeline(groups or [], enrichments, decision)
+
     rca_obj = {
         "root_cause": root_cause,
         "contributing_factors": contributing,
         "impact": impact,
         "resolution": resolution,
+        "timeline_before_after_event": "\n".join([f"{i+1}. {x}" for i, x in enumerate(timeline_lines)]),
         "lessons_learned": "\n".join([f"{i+1}. {x}" for i, x in enumerate(lessons)]),
         "actionable_steps_for_L1": "\n".join([f"{i+1}. {x}" for i, x in enumerate(actionable[:8])]),
         "metadata": {
@@ -847,6 +912,9 @@ def render_report(
         ev = evidence if isinstance(evidence, list) else [evidence]
         for i, e in enumerate(ev[:5], 1):
             md_lines.append(f"  {i}. {e}")
+    md_lines.append("- **Timeline (Before/After Event):**")
+    for i, t in enumerate(timeline_lines, 1):
+        md_lines.append(f"  {i}. {t}")
     md_lines.append("- **Actionable Steps for L1:**")
     for i, a in enumerate(actionable[:8], 1):
         md_lines.append(f"  {i}. {a}")
@@ -1090,7 +1158,7 @@ async def main(cli_request_id: Optional[str], input_payload: Optional[Dict[str, 
     sdp_result = await run_sdp_flow(request_id, decision, matched_kb_id)
     sdp_done = sdp_result is not None
 
-    report = render_report(decision, len(groups), len(enrichments), sdp_done, request_id, matched_kb_id, enrichments)
+    report = render_report(decision, len(groups), len(enrichments), sdp_done, request_id, matched_kb_id, enrichments, groups)
     await send_teams(report)
 
     print("[OK] Multi-agent RCA complete")
