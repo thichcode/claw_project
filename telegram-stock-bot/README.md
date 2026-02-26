@@ -49,6 +49,9 @@ python bot.py
 ## 4) Lệnh sử dụng
 - `/start`
 - `/top3` — Top 3 + vùng mua/SL/TP + khối lượng gợi ý
+- `/signal <MÃ>` — phân tích chi tiết 1 mã
+- `/why <MÃ>` — breakdown điểm số + luận điểm
+- `/compare <MÃ1> <MÃ2>` — so sánh nhanh 2 mã
 - `/watchlist`
 - `/reporttime`
 - `/risk <von_vnd> <risk_pct>` (ví dụ: `/risk 100000000 1`)

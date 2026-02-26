@@ -249,15 +249,27 @@ def _fetch_score(symbol: str) -> dict | None:
 
         plan = _trade_plan(float(last), float(ma20), float(atr14))
 
+        score_components = {
+            "base": 40.0,
+            "trend": round(trend_score * 18, 2),
+            "momentum": round(momentum_score * 14, 2),
+            "liquidity": round(liquidity_score * 12, 2),
+            "rsi": round(rsi_score * 8, 2),
+            "macd": round(macd_score * 8, 2),
+        }
+
         return {
             "symbol": symbol,
             "price": float(last),
             "ret5": float(ret5),
             "vol_ratio": float(vol_ratio),
             "score": float(score),
+            "score_components": score_components,
             "trend_up": bool(ma20 > ma50),
             "rsi14": float(rsi14),
             "macd_bull": macd_bull,
+            "ma20": float(ma20),
+            "ma50": float(ma50),
             "plan": plan,
         }
     except Exception:
@@ -313,6 +325,77 @@ def render_top3(chat_id: int | None = None) -> str:
         "⚠️ Bot tham khảo, không phải khuyến nghị đầu tư chắc chắn thắng.",
     ]
     return "\n".join(lines)
+
+
+def analyze_symbol(symbol: str, chat_id: int | None = None) -> str:
+    symbol = symbol.strip().upper().replace('.VN', '')
+    row = _fetch_score(symbol)
+    if not row:
+        return f"Không lấy được dữ liệu cho mã {symbol}."
+
+    risk_prof = _get_risk_profile(chat_id) if chat_id is not None else {
+        "capital_vnd": _safe_float(os.getenv("DEFAULT_CAPITAL_VND", "100000000"), 100_000_000),
+        "risk_pct": _safe_float(os.getenv("RISK_PER_TRADE_PCT", "1.0"), 1.0),
+    }
+    plan = row["plan"]
+    pos = _position_size(plan, risk_prof["capital_vnd"], risk_prof["risk_pct"])
+
+    trend = "✅" if row["trend_up"] else "⚠️"
+    macd = "✅" if row["macd_bull"] else "⚠️"
+    confidence = min(max((row["score"] - 40) / 60, 0), 1)
+
+    return (
+        f"🔎 Signal {row['symbol']}\n"
+        f"- Giá: {row['price']:.2f}\n"
+        f"- Score: {row['score']:.1f} | Confidence: {confidence:.0%}\n"
+        f"- Trend: {trend} (MA20 {row['ma20']:.2f} vs MA50 {row['ma50']:.2f})\n"
+        f"- RSI14: {row['rsi14']:.1f} | MACD: {macd}\n"
+        f"- Ret 5d: {row['ret5']:+.2f}% | Volume ratio: x{row['vol_ratio']:.2f}\n"
+        f"- Vùng mua: {plan['entry_low']:.2f}-{plan['entry_high']:.2f}\n"
+        f"- SL: {plan['sl']:.2f} | TP1: {plan['tp1']:.2f} | TP2: {plan['tp2']:.2f}\n"
+        f"- Khối lượng gợi ý: ~{pos['qty']} cp"
+    )
+
+
+def explain_symbol(symbol: str) -> str:
+    symbol = symbol.strip().upper().replace('.VN', '')
+    row = _fetch_score(symbol)
+    if not row:
+        return f"Không lấy được dữ liệu cho mã {symbol}."
+
+    c = row.get("score_components", {})
+    reasons = []
+    if row["trend_up"]:
+        reasons.append("MA20 > MA50 (xu hướng ngắn hạn tích cực)")
+    else:
+        reasons.append("MA20 <= MA50 (xu hướng chưa đẹp)")
+    if row["macd_bull"]:
+        reasons.append("MACD bullish")
+    if 45 <= row["rsi14"] <= 65:
+        reasons.append("RSI ở vùng cân bằng khỏe")
+
+    return (
+        f"🧠 Why {row['symbol']}\n"
+        f"- Score tổng: {row['score']:.1f}\n"
+        f"- Breakdown: base {c.get('base', 0):.1f}, trend {c.get('trend', 0):+.1f}, momentum {c.get('momentum', 0):+.1f}, "
+        f"liquidity {c.get('liquidity', 0):+.1f}, rsi {c.get('rsi', 0):+.1f}, macd {c.get('macd', 0):+.1f}\n"
+        f"- Luận điểm: " + "; ".join(reasons)
+    )
+
+
+def compare_symbols(sym1: str, sym2: str) -> str:
+    a = _fetch_score(sym1.strip().upper().replace('.VN', ''))
+    b = _fetch_score(sym2.strip().upper().replace('.VN', ''))
+    if not a or not b:
+        return "Không lấy được dữ liệu cho một trong hai mã."
+
+    winner = a if a["score"] >= b["score"] else b
+    return (
+        f"⚖️ Compare {a['symbol']} vs {b['symbol']}\n"
+        f"- {a['symbol']}: score {a['score']:.1f}, ret5d {a['ret5']:+.2f}%, RSI {a['rsi14']:.1f}, vol x{a['vol_ratio']:.2f}\n"
+        f"- {b['symbol']}: score {b['score']:.1f}, ret5d {b['ret5']:+.2f}%, RSI {b['rsi14']:.1f}, vol x{b['vol_ratio']:.2f}\n"
+        f"=> Ưu tiên hiện tại: {winner['symbol']}"
+    )
 
 
 # ---------- Intraday alerts ----------
@@ -453,6 +536,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Xin chào, mình là bot phân tích cổ phiếu VN (V2.1).\n"
         "Lệnh:\n"
         "/top3 - Top 3 mã ưu tiên + vùng mua/SL/TP + khối lượng\n"
+        "/signal <MÃ> - Phân tích chi tiết 1 mã\n"
+        "/why <MÃ> - Giải thích breakdown điểm số\n"
+        "/compare <MÃ1> <MÃ2> - So sánh 2 mã\n"
         "/watchlist - Xem danh sách mã đang quét\n"
         "/reporttime - Xem giờ gửi báo cáo tự động\n"
         "/risk <von_vnd> <risk_pct> - Cài quản lý vốn, vd: /risk 100000000 1\n"
@@ -517,6 +603,30 @@ async def myrisk(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    if len(context.args) < 1:
+        await update.message.reply_text("Cú pháp: /signal <MÃ>\nVí dụ: /signal FPT")
+        return
+    symbol = context.args[0]
+    await update.message.reply_text(analyze_symbol(symbol, chat_id=chat_id))
+
+
+async def why(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) < 1:
+        await update.message.reply_text("Cú pháp: /why <MÃ>\nVí dụ: /why HPG")
+        return
+    symbol = context.args[0]
+    await update.message.reply_text(explain_symbol(symbol))
+
+
+async def compare(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) < 2:
+        await update.message.reply_text("Cú pháp: /compare <MÃ1> <MÃ2>\nVí dụ: /compare FPT HPG")
+        return
+    await update.message.reply_text(compare_symbols(context.args[0], context.args[1]))
+
+
 async def daily_report_job(context: ContextTypes.DEFAULT_TYPE):
     chat_ids = _load_chat_ids()
     if not chat_ids:
@@ -545,6 +655,9 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("top3", top3))
     app.add_handler(CommandHandler("watchlist", watchlist))
+    app.add_handler(CommandHandler("signal", signal))
+    app.add_handler(CommandHandler("why", why))
+    app.add_handler(CommandHandler("compare", compare))
     app.add_handler(CommandHandler("reporttime", reporttime))
     app.add_handler(CommandHandler("risk", risk))
     app.add_handler(CommandHandler("myrisk", myrisk))
