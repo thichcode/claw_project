@@ -5,14 +5,20 @@ Python script for asynchronous RCA pipeline:
 - Correlation by event time window (±10 minutes)
 - SQLite TTL cache
 - Batch processing with controlled concurrency
-- Optional LLM summary
+- Multi-agent RCA (collector/correlation/hypothesis/verifier/decision)
+- Metric trend + anomaly scoring (CPU/memory/disk/network/process/log)
+- Smart input parsing (JSON fields + raw text + URL extraction)
 - Microsoft Teams webhook output
-- Optional ServiceDesk Plus v14720+ flow (ITSM 5W1H):
-  1) update solution (5W1H format)
+- Optional ServiceDesk Plus v14720+ flow:
+  1) update solution
   2) add exactly 1 task
   3) close that task
   4) add worklog
   5) close ticket
+- KB matching from JSON and auto-attach KB ID into RCA + SDP
+- Confidence calibration + guardrail mode (avoid overconfident RCA)
+- Report output aligned to `sample_rca.txt` format (`rca` + `summary_markdown` + structured `timeline`)
+- Datetime parsing/formatting standardized to GMT+7 (Asia/Saigon)
 
 ## Run
 
@@ -33,6 +39,11 @@ With input payload (request_id taken from input, and can include only `hostname`
 ```bash
 python rca_multi_agent.py --input-json input.json
 ```
+
+Input also supports:
+- `raw_input`, `subject`, `description_text` (auto-parse hostname/eventid/request_id)
+- `url` with SDP links (`woID=...`, `/requests/...`, `/workorder/...`)
+- `kb_json` or `kb_path` (path to KB JSON file for KB ID matching)
 
 Override request id explicitly:
 
@@ -80,3 +91,23 @@ Nếu không set `LLM_API_KEY` thì script vẫn chạy, chỉ dùng fallback RC
 - `SDP_TASK_OWNER` (optional)
 - `SDP_RESOLUTION_PREFIX` (default: `[AUTO RCA]`)
 - `SDP_CLOSE_STATUS` (default: `Closed`)
+- `KB_JSON_PATH` (optional, default KB file path)
+- `KB_MATCH_MIN_SCORE` (default: `0.2`, threshold for KB matching)
+
+## Output format
+
+`rca_multi_agent.py` report now returns JSON string with:
+
+- `rca.root_cause`
+- `rca.contributing_factors`
+- `rca.impact`
+- `rca.resolution`
+- `rca.timeline` (array of `{time, event}`)
+- `rca.lessons_learned`
+- `rca.actionable_steps_for_L1`
+- `rca.metadata` (confidence calibrated/raw, guardrail_mode, kb_id, kb_match_score, anomaly highlights, correlation counts, SDP state)
+- `summary_markdown`
+
+Reference samples:
+- `sample_rca.txt` (normal mode)
+- `sample_rca_guardrail_on.txt` (guardrail mode)
