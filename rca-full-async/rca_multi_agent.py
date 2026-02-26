@@ -48,6 +48,10 @@ SDP_TASK_TITLE = os.getenv("SDP_TASK_TITLE", "RCA investigation")
 SDP_TASK_OWNER = os.getenv("SDP_TASK_OWNER", "")
 SDP_CLOSE_STATUS = os.getenv("SDP_CLOSE_STATUS", "Closed")
 
+# ===== KB matching =====
+KB_JSON_PATH = os.getenv("KB_JSON_PATH", "")
+KB_MATCH_MIN_SCORE = float(os.getenv("KB_MATCH_MIN_SCORE", "0.2"))
+
 
 # ---------------- HTTP helpers ----------------
 def http_json_request(method: str, url: str, payload: Optional[Dict[str, Any]] = None, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
@@ -509,10 +513,18 @@ async def send_teams(text: str):
     await to_thread(http_json_request, "POST", TEAMS_WEBHOOK_URL, {"text": text})
 
 
-def render_report(decision: Dict[str, Any], groups_count: int, enrichment_count: int, sdp_done: bool, request_id: str) -> str:
+def render_report(
+    decision: Dict[str, Any],
+    groups_count: int,
+    enrichment_count: int,
+    sdp_done: bool,
+    request_id: str,
+    kb_id: Optional[str],
+) -> str:
     confidence = decision.get("confidence", "n/a")
     root_cause = decision.get("root_cause", "N/A")
     impact = decision.get("impact", "N/A")
+    kb_line = kb_id or "N/A"
     return (
         f"🚨 RCA Multi-Agent Report - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
         f"- Correlated groups: {groups_count}\n"
@@ -520,6 +532,7 @@ def render_report(decision: Dict[str, Any], groups_count: int, enrichment_count:
         f"- Root cause: {root_cause}\n"
         f"- Confidence: {confidence}\n"
         f"- Impact: {impact}\n"
+        f"- KB matched id: {kb_line}\n"
         f"- ServiceDesk Plus: {'done' if sdp_done else 'skipped'}"
         + (f" (request_id={request_id})" if sdp_done else "")
     )
@@ -528,6 +541,72 @@ def render_report(decision: Dict[str, Any], groups_count: int, enrichment_count:
 def read_json(path: str) -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def load_kb_entries(path: str) -> List[Dict[str, Any]]:
+    if not path:
+        return []
+    try:
+        raw = read_json(path)
+    except Exception:
+        return []
+
+    if isinstance(raw, list):
+        return [x for x in raw if isinstance(x, dict)]
+
+    if not isinstance(raw, dict):
+        return []
+
+    for key in ("kbs", "kb", "items", "articles", "data", "knowledge_base"):
+        val = raw.get(key)
+        if isinstance(val, list):
+            return [x for x in val if isinstance(x, dict)]
+
+    return []
+
+
+def _normalize_text(s: Any) -> str:
+    return " ".join(str(s or "").lower().split())
+
+
+def _token_set(s: Any) -> set:
+    text = _normalize_text(s)
+    return {t for t in text.replace("\n", " ").split(" ") if len(t) >= 3}
+
+
+def pick_best_kb_id(solution_text: str, kb_entries: List[Dict[str, Any]], min_score: float = KB_MATCH_MIN_SCORE) -> Optional[str]:
+    sol_tokens = _token_set(solution_text)
+    if not sol_tokens:
+        return None
+
+    best_id: Optional[str] = None
+    best_score = 0.0
+
+    for kb in kb_entries:
+        kb_id = kb.get("id") or kb.get("kb_id") or kb.get("article_id") or kb.get("knowledge_id")
+        if not kb_id:
+            continue
+
+        kb_text = " ".join([
+            str(kb.get("title") or ""),
+            str(kb.get("summary") or ""),
+            str(kb.get("problem") or ""),
+            str(kb.get("root_cause") or ""),
+            str(kb.get("solution") or ""),
+            str(kb.get("content") or ""),
+            str(kb.get("description") or ""),
+        ])
+        kb_tokens = _token_set(kb_text)
+        if not kb_tokens:
+            continue
+
+        overlap = len(sol_tokens & kb_tokens)
+        score = overlap / max(1, len(sol_tokens | kb_tokens))
+        if score > best_score:
+            best_score = score
+            best_id = str(kb_id)
+
+    return best_id if best_score >= min_score else None
 
 
 async def main(cli_request_id: Optional[str], input_payload: Optional[Dict[str, Any]]):
@@ -573,11 +652,18 @@ async def main(cli_request_id: Optional[str], input_payload: Optional[Dict[str, 
 
     decision = await decision_agent(collected, corr_out, hypotheses, verifier)
 
+    # KB matching: compare generated solution text vs KB JSON entries to pick best KB id
+    solution_text = build_itsm_5w1h_markdown(decision)
+    ip = input_payload or {}
+    kb_path = str(ip.get("kb_json") or ip.get("kb_path") or KB_JSON_PATH or "").strip()
+    kb_entries = load_kb_entries(kb_path) if kb_path else []
+    matched_kb_id = pick_best_kb_id(solution_text, kb_entries)
+
     request_id = resolve_request_id(cli_request_id, input_payload)
     sdp_result = await run_sdp_flow(request_id, decision)
     sdp_done = sdp_result is not None
 
-    report = render_report(decision, len(groups), len(enrichments), sdp_done, request_id)
+    report = render_report(decision, len(groups), len(enrichments), sdp_done, request_id, matched_kb_id)
     await send_teams(report)
 
     print("[OK] Multi-agent RCA complete")
