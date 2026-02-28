@@ -87,6 +87,44 @@ Filter examples:
 - `GET /api/audit?action=deploy_requested`
 - `GET /api/audit?actor=sec-lead&action=approved_and_executed`
 
+## 3.1) Ví dụ kết quả scan DevSecOps
+
+Input từ Teams:
+- `scan 123 main`
+
+Response nhanh (MVP):
+- `Scan started. [MVP stub] Security scan requested for project=123, branch=main`
+
+Ví dụ báo cáo tổng hợp sau khi pipeline chạy xong:
+
+- Project: `payment-api`
+- Branch: `main`
+- Commit: `a1b2c3d`
+- Status: `FAILED (policy gate)`
+
+Findings:
+- SAST: High=1, Medium=2
+  - `app/auth.py:88` hardcoded secret (HIGH)
+- Secret scan: Critical=1
+  - `.env.example:12` chứa token pattern
+- Dependency scan: High=2
+  - `requests 2.31.0` có advisory mức high, khuyến nghị nâng phiên bản
+- Container scan: Critical=1, High=3
+- SBOM: generated
+- Cosign signature: missing
+
+Policy decision:
+- `block_on_critical_vuln=true`
+- `require_image_signature=true`
+- Kết luận: chặn deploy stage/prod
+
+Gợi ý remediation:
+1. Remove + rotate leaked secrets
+2. Update vulnerable dependencies
+3. Rebuild image base mới
+4. Sign image bằng Cosign
+5. Re-run scan
+
 ## 4) GitLab CI template
 
 Đã có `.gitlab-ci.yml` MVP với stages:
