@@ -1,0 +1,42 @@
+stages:
+  - lint
+  - test
+  - security
+  - build
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+cache:
+  paths:
+    - .cache/pip
+
+lint:
+  stage: lint
+  image: python:3.12-slim
+  script:
+    - pip install -r requirements.txt
+    - python -m py_compile app/*.py app/tools/*.py app/agents/*.py
+
+test:
+  stage: test
+  image: python:3.12-slim
+  script:
+    - echo "Add pytest suite in v1.1"
+
+security:trivy-fs:
+  stage: security
+  image: aquasec/trivy:latest
+  script:
+    - trivy fs --exit-code 0 --severity HIGH,CRITICAL .
+
+build:image:
+  stage: build
+  image: docker:26
+  services:
+    - docker:26-dind
+  script:
+    - docker build -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" .
+    - echo "Push/sign steps in v1.1"
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
