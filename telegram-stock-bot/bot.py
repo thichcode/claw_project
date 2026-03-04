@@ -1,6 +1,11 @@
+import hashlib
 import json
 import os
+import random
+import sys
+import time as time_module
 from datetime import datetime, time
+from io import StringIO
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -9,6 +14,7 @@ import pandas as pd
 import yfinance as yf
 from dotenv import load_dotenv
 from telegram import Update
+from vnstock import Vnstock
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 load_dotenv()
@@ -17,6 +23,172 @@ DEFAULT_WATCHLIST = ["FPT", "CTG", "HPG", "VCB", "TCB", "MBB", "SSI", "VND", "MW
 CHAT_STORE = Path(__file__).parent / "chat_ids.json"
 RISK_STORE = Path(__file__).parent / "risk_profiles.json"
 ALERT_STATE_STORE = Path(__file__).parent / "alerts_state.json"
+CACHE_DIR = Path(__file__).parent / ".cache"
+
+
+def _configure_utf8_io():
+    """
+    Avoid Windows cp1252 console encoding crashes when logs/messages contain emoji/Vietnamese text.
+    """
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if not stream:
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
+def _is_rate_limited_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "too many requests" in msg or "ratelimit" in msg or "rate limit" in msg
+
+
+def _cache_key(ticker: str, period: str, interval: str) -> str:
+    raw = f"{ticker}|{period}|{interval}".encode("utf-8")
+    return hashlib.sha1(raw).hexdigest()
+
+
+def _cache_path(ticker: str, period: str, interval: str) -> Path:
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    return CACHE_DIR / f"yf_{_cache_key(ticker, period, interval)}.json"
+
+
+def _save_df_cache(ticker: str, period: str, interval: str, df: pd.DataFrame):
+    if df is None or df.empty:
+        return
+    payload = {
+        "saved_at": time_module.time(),
+        "data": df.to_json(orient="split", date_format="iso"),
+    }
+    _cache_path(ticker, period, interval).write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _load_df_cache(ticker: str, period: str, interval: str, max_age_seconds: int) -> pd.DataFrame:
+    if max_age_seconds <= 0:
+        return pd.DataFrame()
+
+    path = _cache_path(ticker, period, interval)
+    if not path.exists():
+        return pd.DataFrame()
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        saved_at = float(payload.get("saved_at", 0))
+        if (time_module.time() - saved_at) > max_age_seconds:
+            return pd.DataFrame()
+
+        data_str = payload.get("data", "")
+        if not data_str:
+            return pd.DataFrame()
+
+        return pd.read_json(StringIO(data_str), orient="split")
+    except Exception:
+        return pd.DataFrame()
+
+
+def _period_to_start_end(period: str) -> tuple[str, str]:
+    now = datetime.now(ZoneInfo(os.getenv("BOT_TIMEZONE", "Asia/Saigon")))
+    days_map = {
+        "5d": 7,
+        "1mo": 35,
+        "3mo": 100,
+        "6mo": 200,
+        "8mo": 260,
+        "1y": 380,
+    }
+    days = days_map.get(period.lower(), 260)
+    start = (now - pd.Timedelta(days=days)).date().isoformat()
+    end = now.date().isoformat()
+    return start, end
+
+
+def _download_from_vnstock(ticker: str, period: str, interval: str) -> pd.DataFrame:
+    symbol = ticker.upper().replace(".VN", "").replace("^", "")
+    source = os.getenv("VNSTOCK_SOURCE", "VCI")
+    start, end = _period_to_start_end(period)
+    vn_interval = "1D" if interval == "1d" else interval
+
+    obj = Vnstock().stock(symbol=symbol, source=source)
+    df = obj.quote.history(start=start, end=end, interval=vn_interval)
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    rename_map = {
+        "time": "Date",
+        "open": "Open",
+        "high": "High",
+        "low": "Low",
+        "close": "Close",
+        "volume": "Volume",
+    }
+    df = df.rename(columns=rename_map)
+    for col in ("Open", "High", "Low", "Close", "Volume"):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    if "Date" in df.columns:
+        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+        df = df.set_index("Date")
+    return df[[c for c in ["Open", "High", "Low", "Close", "Volume"] if c in df.columns]].dropna(how="all")
+
+
+def _download_with_retry(
+    ticker: str,
+    period: str,
+    interval: str,
+    min_rows: int = 0,
+    cache_ttl_seconds: int = 0,
+) -> pd.DataFrame:
+    """
+    Data fetch wrapper (VNSTOCK primary, yfinance fallback) with retry/backoff + cache.
+    """
+    attempts = max(int(_safe_float(os.getenv("YF_RETRY_ATTEMPTS", "4"), 4)), 1)
+    base_sleep = max(_safe_float(os.getenv("YF_RETRY_BASE_SECONDS", "1.2"), 1.2), 0.2)
+
+    primary = os.getenv("MARKET_DATA_SOURCE", "VNSTOCK").strip().upper()
+    enable_yf_fallback = os.getenv("ENABLE_YFINANCE_FALLBACK", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+    if primary == "VNSTOCK":
+        sources = ["VNSTOCK", "YFINANCE"] if enable_yf_fallback else ["VNSTOCK"]
+    else:
+        sources = ["YFINANCE", "VNSTOCK"]
+
+    last_exc: Exception | None = None
+    for source in sources:
+        for i in range(attempts):
+            try:
+                if source == "VNSTOCK":
+                    df = _download_from_vnstock(ticker, period, interval)
+                else:
+                    df = yf.download(
+                        ticker,
+                        period=period,
+                        interval=interval,
+                        progress=False,
+                        auto_adjust=True,
+                        threads=False,
+                    )
+
+                if isinstance(df, pd.DataFrame) and not df.empty and len(df) >= min_rows:
+                    _save_df_cache(ticker, period, interval, df)
+                    return df
+            except Exception as exc:
+                last_exc = exc
+                if source == "YFINANCE" and not _is_rate_limited_error(exc):
+                    break
+
+            if i < attempts - 1:
+                delay = base_sleep * (2 ** i) + random.uniform(0, 0.7)
+                time_module.sleep(delay)
+
+    cached = _load_df_cache(ticker, period, interval, max_age_seconds=cache_ttl_seconds)
+    if not cached.empty and len(cached) >= min_rows:
+        return cached
+
+    if last_exc:
+        raise last_exc
+    return pd.DataFrame()
 
 
 # ---------- Config helpers ----------
@@ -138,7 +310,7 @@ def _market_regime() -> dict:
     Filter by VN-Index trend. bullish when MA20 > MA50 and price > MA20.
     """
     try:
-        df = yf.download("^VNINDEX", period="8mo", interval="1d", progress=False, auto_adjust=True)
+        df = _download_with_retry("^VNINDEX", period="8mo", interval="1d", min_rows=60, cache_ttl_seconds=3600)
         if df is None or df.empty or len(df) < 60:
             return {"ok": True, "label": "NEUTRAL (không đủ dữ liệu VN-Index)", "score": 0}
 
@@ -204,7 +376,7 @@ def _position_size(plan: dict, capital_vnd: float, risk_pct: float) -> dict:
 def _fetch_score(symbol: str) -> dict | None:
     ticker = f"{symbol}.VN"
     try:
-        df = yf.download(ticker, period="6mo", interval="1d", progress=False, auto_adjust=True)
+        df = _download_with_retry(ticker, period="6mo", interval="1d", min_rows=80, cache_ttl_seconds=3600)
         if df is None or df.empty or len(df) < 80:
             return None
 
@@ -405,7 +577,7 @@ def _fetch_intraday_snapshot(symbol: str) -> dict | None:
     """
     ticker = f"{symbol}.VN"
     try:
-        df = yf.download(ticker, period="5d", interval="15m", progress=False, auto_adjust=True)
+        df = _download_with_retry(ticker, period="5d", interval="15m", min_rows=20, cache_ttl_seconds=900)
         if df is None or df.empty or len(df) < 20:
             return None
 
@@ -641,6 +813,8 @@ async def daily_report_job(context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
+    _configure_utf8_io()
+
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
         raise RuntimeError("Thiếu TELEGRAM_BOT_TOKEN trong file .env")

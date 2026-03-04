@@ -1,0 +1,2 @@
+Smoke test v1
+timestamp ok

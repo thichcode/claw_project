@@ -25,3 +25,7 @@ USER.md
 **/__pycache__/
 **/*.pyc
 **/.venv/
+**/node_modules/
+**/.cache/
+**/test_output.txt
+**/chat_ids.json

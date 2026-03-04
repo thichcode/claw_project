@@ -46,6 +46,18 @@ Mở `.env`, điền:
 python bot.py
 ```
 
+## 3.1) Khóa phiên bản dependencies (khuyến nghị)
+```bash
+pip freeze > requirements-lock.txt
+```
+
+## 3.2) Chạy bền vững + tự khởi động lại (Windows Task Scheduler)
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install_startup_task.ps1
+```
+
+Script nền dùng `run_bot_forever.ps1`, log theo ngày tại thư mục `logs/`.
+
 ## 4) Lệnh sử dụng
 - `/start`
 - `/top3` — Top 3 + vùng mua/SL/TP + khối lượng gợi ý
@@ -71,6 +83,7 @@ python bot.py
 ---
 
 ## Lưu ý
-- Dữ liệu lấy từ Yahoo Finance (`.VN` và `^VNINDEX`)
+- Dữ liệu chính lấy từ `vnstock` (VCI), có cache cục bộ (`.cache/`) để giảm lỗi tạm thời
+- Có thể bật fallback Yahoo bằng `ENABLE_YFINANCE_FALLBACK=true` (mặc định tắt)
 - Đây là bot tham khảo, không đảm bảo lợi nhuận
 - Nên tự kiểm tra thêm KQKD, định giá, tin tức trước khi vào lệnh

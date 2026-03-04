@@ -1,0 +1,26 @@
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.22);
+}
+.panelTitle { margin: 0 0 10px; font-size: 16px; }
+
+.badge {
+  font-size: 12px;
+  border-radius: 999px;
+  border: 1px solid;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+.critical { background: rgba(239,68,68,.15); color: #fca5a5; border-color: rgba(239,68,68,.35); }
+.warning { background: rgba(245,158,11,.15); color: #fcd34d; border-color: rgba(245,158,11,.35); }
+.ok { background: rgba(34,197,94,.15); color: #86efac; border-color: rgba(34,197,94,.35); }
+.info { background: rgba(56,189,248,.15); color: #7dd3fc; border-color: rgba(56,189,248,.35); }
+
+.kpiValue { font-size: 28px; font-weight: 800; }
+.kpiLabel { color: var(--muted); font-size: 12px; margin-top: 4px; }
+
+.hotspotTrendUp { color: #fca5a5; font-weight: 700; }
+.hotspotTrendDown { color: #86efac; font-weight: 700; }
