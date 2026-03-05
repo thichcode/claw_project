@@ -51,6 +51,29 @@ class IngestEvent(BaseModel):
     payload: dict = Field(default_factory=dict)
 
 
+class TopologyNode(BaseModel):
+    service_id: int
+    name: str
+    environment: str = "prod"
+    health: str = "unknown"
+    meta: Optional[str] = None
+    open_alerts: int = 0
+    open_incidents: int = 0
+
+
+class TopologyEdge(BaseModel):
+    from_service_id: int
+    to_service_id: int
+    relation: str = "depends_on"
+    criticality: str = "medium"
+
+
+class TopologyKPI(BaseModel):
+    affected_services: int = 0
+    critical_edges: int = 0
+    blast_radius: str = "Low"
+
+
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
@@ -124,6 +147,44 @@ def save_ingest(source: str, event: IngestEvent):
         ),
     )
     return row
+
+
+def severity_to_rank(sev: Optional[str]):
+    key = str(sev or "").lower()
+    if key in ("critical", "disaster", "p1"):
+        return 3
+    if key in ("high", "error", "p2"):
+        return 2
+    if key in ("warning", "medium", "warn", "p3"):
+        return 1
+    return 0
+
+
+def rank_to_health(rank: int):
+    if rank >= 2:
+        return "critical"
+    if rank == 1:
+        return "warning"
+    return "healthy"
+
+
+def derive_health(open_alerts: int, open_incidents: int, alert_rank: int = 0, incident_rank: int = 0):
+    base = max(int(alert_rank or 0), int(incident_rank or 0))
+    if base > 0:
+        return rank_to_health(base)
+    if open_incidents > 0:
+        return "critical"
+    if open_alerts > 0:
+        return "warning"
+    return "healthy"
+
+
+def compute_blast_radius(affected_services: int):
+    if affected_services >= 10:
+        return "High"
+    if affected_services >= 4:
+        return "Medium"
+    return "Low"
 
 
 @app.post("/ingest/zabbix")
@@ -308,12 +369,229 @@ def resolve_incident(incident_id: int, user=Depends(auth_user)):
     return row
 
 
+@app.get("/topology")
+def topology(env: Optional[str] = "prod", _: dict = Depends(auth_user)):
+    try:
+        nodes = query_all(
+            """
+            SELECT
+                s.id as service_id,
+                s.name,
+                s.environment,
+                s.owner,
+                COALESCE(a.open_alerts, 0) as open_alerts,
+                COALESCE(a.alert_rank, 0) as alert_rank,
+                COALESCE(i.open_incidents, 0) as open_incidents,
+                COALESCE(i.incident_rank, 0) as incident_rank
+            FROM services s
+            LEFT JOIN (
+                SELECT
+                    service_id,
+                    COUNT(*) as open_alerts,
+                    MAX(CASE
+                        WHEN LOWER(COALESCE(severity, '')) IN ('critical','disaster','p1') THEN 3
+                        WHEN LOWER(COALESCE(severity, '')) IN ('high','error','p2') THEN 2
+                        WHEN LOWER(COALESCE(severity, '')) IN ('warning','medium','warn','p3') THEN 1
+                        ELSE 0
+                    END) as alert_rank
+                FROM alert_events
+                WHERE status = 'open'
+                GROUP BY service_id
+            ) a ON a.service_id = s.id
+            LEFT JOIN (
+                SELECT
+                    service_id,
+                    COUNT(*) as open_incidents,
+                    MAX(CASE
+                        WHEN LOWER(COALESCE(severity, '')) IN ('critical','disaster','p1') THEN 3
+                        WHEN LOWER(COALESCE(severity, '')) IN ('high','error','p2') THEN 2
+                        WHEN LOWER(COALESCE(severity, '')) IN ('warning','medium','warn','p3') THEN 1
+                        ELSE 2
+                    END) as incident_rank
+                FROM incidents
+                WHERE status IN ('open', 'acked')
+                GROUP BY service_id
+            ) i ON i.service_id = s.id
+            WHERE s.environment = %s
+            ORDER BY s.name ASC
+            """,
+            (env,),
+        )
+    except Exception:
+        nodes = []
+
+    try:
+        edges = query_all(
+            """
+            SELECT from_service_id, to_service_id, dependency_type, criticality
+            FROM service_dependencies
+            ORDER BY id ASC
+            """
+        )
+    except Exception:
+        edges = []
+
+    base_nodes = [
+        TopologyNode(
+            service_id=n["service_id"],
+            name=n["name"],
+            environment=n.get("environment") or "prod",
+            health=derive_health(
+                n.get("open_alerts", 0),
+                n.get("open_incidents", 0),
+                n.get("alert_rank", 0),
+                n.get("incident_rank", 0),
+            ),
+            meta=f"owner: {n.get('owner') or 'unknown'}",
+            open_alerts=n.get("open_alerts", 0),
+            open_incidents=n.get("open_incidents", 0),
+        ).model_dump()
+        for n in nodes
+    ]
+
+    normalized_edges = [
+        TopologyEdge(
+            from_service_id=e["from_service_id"],
+            to_service_id=e["to_service_id"],
+            relation=e.get("dependency_type") or "depends_on",
+            criticality=e.get("criticality") or "medium",
+        ).model_dump()
+        for e in edges
+    ]
+
+    # Dependency impact propagation (from_service depends on to_service).
+    node_map = {n["service_id"]: dict(n) for n in base_nodes}
+    impacted_by = {n["service_id"]: set() for n in base_nodes}
+
+    # keep soft mapping simple for now
+    criticality_weight = {"critical": 2, "high": 2, "medium": 1, "low": 1}
+    propagate_relations = {"runtime_call", "data_store", "cache_layer", "traffic_route", "depends_on"}
+
+    for _ in range(4):  # bounded propagation depth
+        changed = False
+        for e in normalized_edges:
+            from_id = e["from_service_id"]
+            to_id = e["to_service_id"]
+            if from_id not in node_map or to_id not in node_map:
+                continue
+
+            relation = str(e.get("relation") or "depends_on").lower()
+            if relation not in propagate_relations:
+                continue
+
+            dep_rank = severity_to_rank(node_map[to_id]["health"])
+            svc_rank = severity_to_rank(node_map[from_id]["health"])
+            edge_w = criticality_weight.get(str(e.get("criticality") or "medium").lower(), 1)
+
+            target_rank = svc_rank
+            if dep_rank >= 2:
+                target_rank = max(target_rank, 2 if edge_w >= 2 else 1)
+            elif dep_rank == 1:
+                target_rank = max(target_rank, 1)
+
+            if target_rank > svc_rank:
+                node_map[from_id]["health"] = rank_to_health(target_rank)
+                impacted_by[from_id].add(node_map[to_id]["name"])
+                changed = True
+
+        if not changed:
+            break
+
+    normalized_nodes = []
+    for sid, n in node_map.items():
+        deps = sorted(list(impacted_by.get(sid, set())))
+        if deps:
+            n["meta"] = f"{n.get('meta', '')} | impacted by: {', '.join(deps[:2])}{'...' if len(deps) > 2 else ''}"
+        normalized_nodes.append(n)
+
+    normalized_nodes.sort(key=lambda x: x.get("name", ""))
+
+    affected_services = len([n for n in normalized_nodes if n["health"] != "healthy"])
+    critical_edges = len([e for e in normalized_edges if e["criticality"] in ("high", "critical")])
+    return {
+        "generated_at": now_iso(),
+        "nodes": normalized_nodes,
+        "edges": normalized_edges,
+        "kpi": TopologyKPI(
+            affected_services=affected_services,
+            critical_edges=critical_edges,
+            blast_radius=compute_blast_radius(affected_services),
+        ).model_dump(),
+    }
+
+
+@app.get("/incidents/{incident_id}/rca")
+def incident_rca(incident_id: int, _: dict = Depends(auth_user)):
+    incident = query_one(
+        """
+        SELECT i.id, i.title, i.severity, i.status, i.service_id, i.created_at, s.name as service_name
+        FROM incidents i
+        LEFT JOIN services s ON s.id = i.service_id
+        WHERE i.id = %s
+        """,
+        (incident_id,),
+    )
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    try:
+        hypotheses = query_all(
+            """
+            SELECT id, hypothesis, confidence, rank, evidence, created_at
+            FROM incident_hypotheses
+            WHERE incident_id = %s
+            ORDER BY rank ASC
+            """,
+            (incident_id,),
+        )
+    except Exception:
+        hypotheses = []
+
+    try:
+        timeline = query_all(
+            """
+            SELECT event_time as ts, event_type, title, source, details as payload
+            FROM incident_timeline
+            WHERE incident_id = %s
+            ORDER BY event_time ASC
+            """,
+            (incident_id,),
+        )
+    except Exception:
+        timeline = []
+
+    impacted = []
+    if incident.get("service_id"):
+        try:
+            impacted = query_all(
+                """
+                SELECT s.id as service_id, s.name, sd.criticality
+                FROM service_dependencies sd
+                JOIN services s ON s.id = sd.from_service_id
+                WHERE sd.to_service_id = %s
+                """,
+                (incident["service_id"],),
+            )
+        except Exception:
+            impacted = []
+
+    return {
+        "incident": incident,
+        "summary": f"RCA for incident {incident_id}",
+        "confidence": float(hypotheses[0]["confidence"]) if hypotheses else 0.0,
+        "hypotheses": hypotheses,
+        "timeline": timeline,
+        "impacted_services": impacted,
+        "generated_at": now_iso(),
+    }
+
+
 @app.get("/summary")
 def summary(_: dict = Depends(auth_user)):
     data = {
-        "open_alerts": query_one("SELECT COUNT(*)::int as c FROM alert_events WHERE status = 'open'")["c"],
-        "acked_alerts": query_one("SELECT COUNT(*)::int as c FROM alert_events WHERE status = 'acked'")["c"],
-        "open_incidents": query_one("SELECT COUNT(*)::int as c FROM incidents WHERE status = 'open'")["c"],
-        "resolved_incidents": query_one("SELECT COUNT(*)::int as c FROM incidents WHERE status = 'resolved'")["c"],
+        "open_alerts": query_one("SELECT COUNT(*) as c FROM alert_events WHERE status = 'open'")["c"],
+        "acked_alerts": query_one("SELECT COUNT(*) as c FROM alert_events WHERE status = 'acked'")["c"],
+        "open_incidents": query_one("SELECT COUNT(*) as c FROM incidents WHERE status = 'open'")["c"],
+        "resolved_incidents": query_one("SELECT COUNT(*) as c FROM incidents WHERE status = 'resolved'")["c"],
     }
     return data

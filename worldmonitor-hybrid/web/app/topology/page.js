@@ -1,40 +1,42 @@
-import { PanelCard, StatusBadge, KPI } from "../components/ui";
+import { DataTable, MetricTile, PageHeader, PanelCard, SectionTitle, StatusBadge } from "../components/ui";
+import { safeApiGet } from "../lib";
 
-const nodes = [
-  { name: "Web App A", meta: "prod · Azure", status: "healthy" },
-  { name: "Web App B", meta: "prod · on-prem", status: "warning" },
-  { name: "Keycloak", meta: "Auth latency p95 2.1s", status: "critical" },
-  { name: "API Gateway", meta: "5xx 2.4%", status: "warning" },
-  { name: "Redis", meta: "Mem 92%", status: "critical" },
-  { name: "Kafka", meta: "Backlog 120k", status: "warning" },
-];
+const topologyFallback = {
+  nodes: [],
+  edges: [],
+  kpi: { affected_services: 0, critical_edges: 0, blast_radius: "Low" },
+};
 
-export default function TopologyPage() {
+export default async function TopologyPage() {
+  const topology = await safeApiGet("/topology", topologyFallback);
+
   return (
     <main>
-      <h1 className="wm-page-title">System Topology</h1>
-      <p className="wm-subtitle">Dependency view and likely choke points.</p>
+      <PageHeader title="Service Topology" subtitle="Dependency graph and blast-radius analysis" />
 
       <div className="wm-grid-2">
-        <PanelCard title="Service map">
-          <table className="wm-table">
-            <thead><tr><th>Node</th><th>Health</th><th>Details</th></tr></thead>
-            <tbody>
-              {nodes.map((n) => (
-                <tr key={n.name}>
-                  <td>{n.name}</td>
-                  <td><StatusBadge status={n.status} /></td>
-                  <td>{n.meta}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <PanelCard>
+          <SectionTitle title="Service map" meta={`${(topology.nodes || []).length} nodes`} />
+          <DataTable>
+            <table className="wm-table">
+              <thead><tr><th>Node</th><th>Health</th><th>Details</th></tr></thead>
+              <tbody>
+                {(topology.nodes || []).map((n) => (
+                  <tr key={n.service_id}>
+                    <td>{n.name}</td>
+                    <td><StatusBadge status={n.health} /></td>
+                    <td>{n.meta || `${n.environment || "prod"} · alerts:${n.open_alerts || 0}`}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </DataTable>
         </PanelCard>
 
         <div style={{ display: "grid", gap: 10 }}>
-          <KPI value="17" label="Affected services" />
-          <KPI value="3" label="Critical edges" />
-          <KPI value="High" label="Blast radius" />
+          <MetricTile value={String(topology.kpi?.affected_services ?? 0)} label="Affected services" tone="warning" />
+          <MetricTile value={String(topology.kpi?.critical_edges ?? 0)} label="Critical edges" tone="critical" />
+          <MetricTile value={topology.kpi?.blast_radius || "Low"} label="Blast radius" tone="info" />
         </div>
       </div>
     </main>

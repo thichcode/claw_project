@@ -9,8 +9,22 @@ export function PanelCard({ title, children, className = "" }) {
   );
 }
 
+export function PageHeader({ title, subtitle, right, children }) {
+  return (
+    <header className={styles.pageHeader}>
+      <div>
+        <h1 className={styles.pageTitle}>{title}</h1>
+        {subtitle ? <p className={styles.pageSubtitle}>{subtitle}</p> : null}
+      </div>
+      {right ? <div className={styles.pageHeaderRight}>{right}</div> : null}
+      {children ? <div className={styles.pageHeaderBottom}>{children}</div> : null}
+    </header>
+  );
+}
+
 export function StatusBadge({ status }) {
-  const key = String(status || "info").toLowerCase();
+  const raw = String(status || "info");
+  const key = raw.toLowerCase().split(" ")[0].split(":")[0];
   const map = {
     critical: styles.critical,
     high: styles.critical,
@@ -23,16 +37,59 @@ export function StatusBadge({ status }) {
     healthy: styles.ok,
     resolved: styles.ok,
     low: styles.ok,
+    info: styles.info,
   };
-  return <span className={`${styles.badge} ${map[key] || styles.info}`}>{status || "unknown"}</span>;
+  return <span className={`${styles.badge} ${map[key] || styles.info}`}>{raw || "unknown"}</span>;
 }
 
 export function KPI({ value, label }) {
   return (
-    <PanelCard>
+    <PanelCard className={styles.metricTile}>
       <div className={styles.kpiValue}>{value}</div>
       <div className={styles.kpiLabel}>{label}</div>
     </PanelCard>
+  );
+}
+
+export function MetricTile({ value, label, trend, tone = "info" }) {
+  const toneClass = {
+    critical: styles.metricCritical,
+    warning: styles.metricWarning,
+    ok: styles.metricOk,
+    info: styles.metricInfo,
+  }[tone] || styles.metricInfo;
+
+  return (
+    <PanelCard className={`${styles.metricTile} ${toneClass}`}>
+      <div className={styles.kpiValue}>{value}</div>
+      <div className={styles.kpiLabel}>{label}</div>
+      {trend ? <div className={styles.metricTrend}>{trend}</div> : null}
+    </PanelCard>
+  );
+}
+
+export function SectionTitle({ title, meta }) {
+  return (
+    <div className={styles.sectionTitle}>
+      <h2>{title}</h2>
+      {meta ? <span>{meta}</span> : null}
+    </div>
+  );
+}
+
+export function DataTable({ children, compact = false }) {
+  return <div className={`${styles.tableWrap} ${compact ? styles.tableCompact : ""}`}>{children}</div>;
+}
+
+export function PillTabs({ items = [], active }) {
+  return (
+    <div className={styles.pillTabs}>
+      {items.map((it) => (
+        <a key={it.href} href={it.href} className={`${styles.pillTab} ${active === it.key ? styles.pillTabActive : ""}`}>
+          {it.label}
+        </a>
+      ))}
+    </div>
   );
 }
 
