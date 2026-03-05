@@ -26,6 +26,8 @@ Hybrid monitoring project with FastAPI + Next.js + Postgres + Redis (Docker Comp
   - `POST /incidents/{id}/comment`
   - `POST /incidents/{id}/resolve`
 - Dashboard: `GET /summary`
+- Topology: `GET /topology`
+- RCA: `GET /incidents/{id}/rca`
 
 ## Frontend routes
 - `/` Dashboard (API + fallback mock)
@@ -47,6 +49,14 @@ UI theme: unified dark NOC style with reusable components:
 ```bash
 docker compose up --build
 ```
+
+> Note: Postgres init scripts only run on first boot of the DB volume.
+> If you added new migration files under `api/migrations/`, recreate DB volume:
+>
+> ```bash
+> docker compose down -v
+> docker compose up --build
+> ```
 
 Services:
 - Web: http://localhost:3000
@@ -83,6 +93,13 @@ curl -X POST http://localhost:8000/incidents/1/assign -H "Authorization: Bearer 
 curl -X POST http://localhost:8000/incidents/1/comment -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" -d '{"comment":"Investigating"}'
 curl -X POST http://localhost:8000/incidents/1/resolve -H "Authorization: Bearer <TOKEN>"
 ```
+
+## Data source integrations
+See `CONNECT_DATA_SOURCES.md` for how to push/connect data from:
+- Zabbix
+- UptimeRobot
+- ELK / Logstash
+- Generic Python scripts
 
 ## Notes
 - Mock auth + plain-text password are for demo only.
