@@ -51,7 +51,10 @@ export default async function DashboardPage({ searchParams }) {
   const locationFromCatalog = normalizedLocations.find(
     (item) => item.code.toLowerCase() === locationParam.toLowerCase()
   )?.code;
-  const location = locationFromCatalog || locationParam || "all";
+  const location =
+    locationParam.toLowerCase() === "all"
+      ? "all"
+      : locationFromCatalog || "all";
 
   const topologyPath = location === "all" ? "/topology" : `/topology?location_code=${encodeURIComponent(location)}`;
   const topologyPromise = safeApiGet(topologyPath, { nodes: [], edges: [] });
