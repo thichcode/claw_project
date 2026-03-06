@@ -77,10 +77,19 @@ export default async function DashboardPage({ searchParams }) {
       </div>
 
       <div style={{ display: "grid", gap: 10 }}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <a href={`/?range=${encodeURIComponent(range)}&war=${warMode ? "1" : "0"}`} style={{ opacity: location === "all" ? 1 : 0.75 }}>Global</a>
+        <div className={styles.locationLinks}>
+          <a
+            href={`/?range=${encodeURIComponent(range)}&war=${warMode ? "1" : "0"}`}
+            className={`${styles.locationLink} ${location === "all" ? styles.locationLinkActive : styles.locationLinkInactive}`}
+          >
+            Global
+          </a>
           {(locations || []).map((l) => (
-            <a key={l.code} href={`/?location=${encodeURIComponent(l.code)}&range=${encodeURIComponent(range)}&war=${warMode ? "1" : "0"}`} style={{ opacity: location === l.code ? 1 : 0.75 }}>
+            <a
+              key={l.code}
+              href={`/?location=${encodeURIComponent(l.code)}&range=${encodeURIComponent(range)}&war=${warMode ? "1" : "0"}`}
+              className={`${styles.locationLink} ${location === l.code ? styles.locationLinkActive : styles.locationLinkInactive}`}
+            >
               {l.code}
             </a>
           ))}
