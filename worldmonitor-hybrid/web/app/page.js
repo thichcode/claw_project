@@ -11,7 +11,9 @@ import styles from "./home.module.css";
 function hotspotScore(n) {
   const h = String(n.health || "").toLowerCase();
   const sev = h === "critical" ? 5 : h === "warning" ? 3 : 1;
-  return sev * 100 + (n.open_incidents || 0) * 30 + (n.open_alerts || 0) * 8;
+  const openIncidents = toSafeNumber(n?.open_incidents);
+  const openAlerts = toSafeNumber(n?.open_alerts);
+  return sev * 100 + openIncidents * 30 + openAlerts * 8;
 }
 
 function ensureArray(value) {
@@ -94,7 +96,9 @@ export default async function DashboardPage({ searchParams }) {
   const estRevenueRisk = Math.round((summary.open_incidents * 1200 + summary.open_alerts * 180) * rangeFactor);
   const slaRisk = Math.min(99, Math.round((summary.open_incidents * 8 + summary.open_alerts * 2.3) * (warMode ? 1.2 : 1)));
   const activeRegions = topologyByLocation.filter((item) =>
-    (item.data?.nodes || []).some((n) => (n.open_alerts || 0) > 0 || (n.open_incidents || 0) > 0)
+    ensureArray(item.data?.nodes).some(
+      (n) => toSafeNumber(n?.open_alerts) > 0 || toSafeNumber(n?.open_incidents) > 0
+    )
   ).length;
 
   return (
