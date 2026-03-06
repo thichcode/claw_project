@@ -27,7 +27,12 @@ export default async function DashboardPage({ searchParams }) {
   const topologyGlobalPromise =
     location === "all" ? topologyPromise : safeApiGet("/topology", { nodes: [], edges: [] });
 
-  const locCodes = (locations || []).map((l) => l.code);
+  const locCodes = Array.from(
+    new Set([
+      ...(locations || []).map((l) => l.code).filter(Boolean),
+      ...(location !== "all" ? [location] : []),
+    ])
+  );
   const topologyByCodePromise = new Map();
   if (location !== "all") topologyByCodePromise.set(location, topologyPromise);
 
