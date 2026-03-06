@@ -41,7 +41,24 @@ def _bootstrap_sqlite(conn):
           name TEXT UNIQUE NOT NULL,
           environment TEXT DEFAULT 'prod',
           owner TEXT,
+          source_key TEXT,
           created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS locations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          code TEXT UNIQUE NOT NULL,
+          name TEXT NOT NULL,
+          level TEXT NOT NULL CHECK(level IN ('site','region','zone')),
+          parent_id INTEGER REFERENCES locations(id) ON DELETE SET NULL,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS service_locations (
+          service_id INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+          location_id INTEGER NOT NULL REFERENCES locations(id) ON DELETE CASCADE,
+          is_primary INTEGER DEFAULT 0,
+          PRIMARY KEY(service_id, location_id)
         );
 
         CREATE TABLE IF NOT EXISTS alert_events (
@@ -49,6 +66,7 @@ def _bootstrap_sqlite(conn):
           source TEXT NOT NULL,
           fingerprint TEXT,
           service_id INTEGER REFERENCES services(id) ON DELETE SET NULL,
+          location_id INTEGER REFERENCES locations(id) ON DELETE SET NULL,
           severity TEXT DEFAULT 'warning',
           title TEXT NOT NULL,
           payload TEXT NOT NULL DEFAULT '{}',
@@ -65,6 +83,7 @@ def _bootstrap_sqlite(conn):
           title TEXT NOT NULL,
           severity TEXT DEFAULT 'medium',
           service_id INTEGER REFERENCES services(id) ON DELETE SET NULL,
+          location_id INTEGER REFERENCES locations(id) ON DELETE SET NULL,
           status TEXT NOT NULL DEFAULT 'open',
           assignee_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
           created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -124,6 +143,17 @@ def _bootstrap_sqlite(conn):
         );
         """
     )
+
+    # lightweight forward-compat for existing sqlite files
+    for ddl in (
+        "ALTER TABLE services ADD COLUMN source_key TEXT",
+        "ALTER TABLE alert_events ADD COLUMN location_id INTEGER REFERENCES locations(id) ON DELETE SET NULL",
+        "ALTER TABLE incidents ADD COLUMN location_id INTEGER REFERENCES locations(id) ON DELETE SET NULL",
+    ):
+        try:
+            conn.execute(ddl)
+        except Exception:
+            pass
 
 
 def get_conn():

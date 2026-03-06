@@ -36,42 +36,67 @@ def run():
             s,
         )
 
+    locations = [
+        ("hcm-dc1", "HCM Datacenter 1", "site"),
+        ("sgp-az1", "Singapore AZ1", "zone"),
+        ("hn-edge", "Ha Noi Edge", "site"),
+    ]
+    for loc in locations:
+        execute(
+            "INSERT INTO locations(code, name, level) VALUES (%s, %s, %s) ON CONFLICT (code) DO NOTHING",
+            loc,
+        )
+
     keycloak = query_one("SELECT id FROM services WHERE name=%s", ("keycloak",))
     datapipe = query_one("SELECT id FROM services WHERE name=%s", ("data-pipeline",))
     api_gw = query_one("SELECT id FROM services WHERE name=%s", ("api-gateway",))
 
+    hcm = query_one("SELECT id FROM locations WHERE code=%s", ("hcm-dc1",))
+    sgp = query_one("SELECT id FROM locations WHERE code=%s", ("sgp-az1",))
+
+    service_location_map = [
+        (keycloak["id"], hcm["id"], True),
+        (datapipe["id"], sgp["id"], True),
+        (api_gw["id"], hcm["id"], True),
+    ]
+    for m in service_location_map:
+        execute(
+            "INSERT INTO service_locations(service_id, location_id, is_primary) VALUES (%s, %s, %s) ON CONFLICT (service_id, location_id) DO NOTHING",
+            m,
+        )
+
     alerts = [
-        ("zabbix", "seed-kc-latency", keycloak["id"], "critical", "Keycloak latency p95 > 2s", {"p95": "2.1s"}, "open"),
-        ("alertmanager", "seed-kafka-backlog", datapipe["id"], "warning", "Kafka backlog increased", {"backlog": "120k"}, "open"),
-        ("uptimerobot", "seed-api-5xx", api_gw["id"], "high", "API gateway 5xx above SLO", {"error_rate": "3.8%"}, "acked"),
+        ("zabbix", "seed-kc-latency", keycloak["id"], hcm["id"], "critical", "Keycloak latency p95 > 2s", {"p95": "2.1s"}, "open"),
+        ("alertmanager", "seed-kafka-backlog", datapipe["id"], sgp["id"], "warning", "Kafka backlog increased", {"backlog": "120k"}, "open"),
+        ("uptimerobot", "seed-api-5xx", api_gw["id"], hcm["id"], "high", "API gateway 5xx above SLO", {"error_rate": "3.8%"}, "acked"),
     ]
     for a in alerts:
         execute(
             """
-            INSERT INTO alert_events(source, fingerprint, service_id, severity, title, payload, status)
-            VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s)
+            INSERT INTO alert_events(source, fingerprint, service_id, location_id, severity, title, payload, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s)
             ON CONFLICT DO NOTHING
             """,
-            (a[0], a[1], a[2], a[3], a[4], json.dumps(a[5]), a[6]),
+            (a[0], a[1], a[2], a[3], a[4], a[5], json.dumps(a[6]), a[7]),
         )
 
     admin = query_one("SELECT id FROM users WHERE username=%s", ("admin",))
 
     execute(
         """
-        INSERT INTO incidents(title, severity, service_id, status, created_by)
-        SELECT %s, %s, %s, %s, %s
+        INSERT INTO incidents(title, severity, service_id, location_id, status, created_by)
+        SELECT %s, %s, %s, %s, %s, %s
         WHERE NOT EXISTS (SELECT 1 FROM incidents WHERE title=%s)
         """,
-        ("Login failures & latency spike", "critical", keycloak["id"], "open", admin["id"], "Login failures & latency spike"),
+        ("Login failures & latency spike", "critical", keycloak["id"], hcm["id"], "open", admin["id"], "Login failures & latency spike"),
     )
     execute(
         """
-        INSERT INTO incidents(title, severity, service_id, status, created_by)
-        SELECT %s, %s, %s, %s, %s
+        INSERT INTO incidents(title, severity, service_id, location_id, status, created_by)
+        SELECT %s, %s, %s, %s, %s, %s
         WHERE NOT EXISTS (SELECT 1 FROM incidents WHERE title=%s)
         """,
-        ("Queue lag on data platform", "high", datapipe["id"], "acked", admin["id"], "Queue lag on data platform"),
+        ("Queue lag on data platform", "high", datapipe["id"], sgp["id"], "acked", admin["id"], "Queue lag on data platform"),
     )
 
     inc = query_one("SELECT id FROM incidents WHERE title=%s", ("Login failures & latency spike",))

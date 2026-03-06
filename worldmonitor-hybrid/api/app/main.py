@@ -28,6 +28,7 @@ class IncidentCreate(BaseModel):
     title: str
     severity: str = "medium"
     service_id: Optional[int] = None
+    location_code: Optional[str] = None
 
 
 class IncidentAssign(BaseModel):
@@ -48,6 +49,9 @@ class IngestEvent(BaseModel):
     service_name: Optional[str] = None
     severity: Optional[str] = "warning"
     title: Optional[str] = "Incoming alert"
+    location_code: Optional[str] = None
+    region: Optional[str] = None
+    zone: Optional[str] = None
     payload: dict = Field(default_factory=dict)
 
 
@@ -125,22 +129,77 @@ def login(body: LoginRequest):
     return {"access_token": token, "token_type": "bearer"}
 
 
-def save_ingest(source: str, event: IngestEvent):
-    service = query_one(
-        "SELECT id FROM services WHERE name = %s LIMIT 1", (event.service_name or "unknown",)
+def resolve_location(event: IngestEvent):
+    loc_code = (event.location_code or event.zone or event.region or "global").strip().lower().replace(" ", "-")
+    if not loc_code:
+        return None
+
+    level = "site"
+    if event.zone:
+        level = "zone"
+    elif event.region:
+        level = "region"
+
+    found = query_one("SELECT id FROM locations WHERE code = %s", (loc_code,))
+    if found:
+        return found["id"]
+
+    created = execute(
+        """
+        INSERT INTO locations(code, name, level)
+        VALUES (%s, %s, %s)
+        RETURNING id
+        """,
+        (loc_code, (event.location_code or event.zone or event.region or "Global").strip(), level),
     )
-    service_id = service["id"] if service else None
+    return created["id"] if created else None
+
+
+def resolve_service(source: str, event: IngestEvent):
+    svc_name = (event.service_name or "unknown-service").strip() or "unknown-service"
+    source_key = f"{source}:{svc_name.lower()}"
+
+    existing = query_one("SELECT id FROM services WHERE name = %s LIMIT 1", (svc_name,))
+    if existing:
+        execute("UPDATE services SET source_key = COALESCE(source_key, %s) WHERE id = %s", (source_key, existing["id"]))
+        return existing["id"]
+
+    created = execute(
+        """
+        INSERT INTO services(name, environment, owner, source_key)
+        VALUES (%s, 'prod', 'unknown', %s)
+        RETURNING id
+        """,
+        (svc_name, source_key),
+    )
+    return created["id"] if created else None
+
+
+def save_ingest(source: str, event: IngestEvent):
+    service_id = resolve_service(source, event)
+    location_id = resolve_location(event)
+
+    if service_id and location_id:
+        execute(
+            """
+            INSERT INTO service_locations(service_id, location_id, is_primary)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (service_id, location_id) DO NOTHING
+            """,
+            (service_id, location_id, True),
+        )
 
     row = execute(
         """
-        INSERT INTO alert_events(source, fingerprint, service_id, severity, title, payload, status)
-        VALUES (%s, %s, %s, %s, %s, %s::jsonb, 'open')
+        INSERT INTO alert_events(source, fingerprint, service_id, location_id, severity, title, payload, status)
+        VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, 'open')
         RETURNING id, source, severity, title, status, created_at
         """,
         (
             source,
             event.fingerprint or f"{source}-{datetime.now().timestamp()}",
             service_id,
+            location_id,
             event.severity,
             event.title,
             json.dumps(event.payload),
@@ -207,9 +266,10 @@ def list_alerts(status: Optional[str] = None, _: dict = Depends(auth_user)):
     if status:
         return query_all(
             """
-            SELECT a.id, a.source, a.severity, a.title, a.status, a.created_at, s.name as service_name
+            SELECT a.id, a.source, a.severity, a.title, a.status, a.created_at, s.name as service_name, l.code as location_code
             FROM alert_events a
             LEFT JOIN services s ON s.id = a.service_id
+            LEFT JOIN locations l ON l.id = a.location_id
             WHERE a.status = %s
             ORDER BY a.created_at DESC
             """,
@@ -217,9 +277,10 @@ def list_alerts(status: Optional[str] = None, _: dict = Depends(auth_user)):
         )
     return query_all(
         """
-        SELECT a.id, a.source, a.severity, a.title, a.status, a.created_at, s.name as service_name
+        SELECT a.id, a.source, a.severity, a.title, a.status, a.created_at, s.name as service_name, l.code as location_code
         FROM alert_events a
         LEFT JOIN services s ON s.id = a.service_id
+        LEFT JOIN locations l ON l.id = a.location_id
         ORDER BY a.created_at DESC
         LIMIT 200
         """
@@ -244,13 +305,26 @@ def ack_alert(alert_id: int, body: AckRequest, user=Depends(auth_user)):
 
 @app.post("/incidents")
 def create_incident(body: IncidentCreate, user=Depends(auth_user)):
+    location_id = None
+    if body.location_code:
+        lc = body.location_code.strip().lower().replace(" ", "-")
+        row_loc = query_one("SELECT id FROM locations WHERE code = %s", (lc,))
+        if row_loc:
+            location_id = row_loc["id"]
+        else:
+            created = execute(
+                "INSERT INTO locations(code, name, level) VALUES (%s, %s, 'site') RETURNING id",
+                (lc, body.location_code.strip()),
+            )
+            location_id = created["id"] if created else None
+
     row = execute(
         """
-        INSERT INTO incidents(title, severity, service_id, status, created_by)
-        VALUES (%s, %s, %s, 'open', %s)
+        INSERT INTO incidents(title, severity, service_id, location_id, status, created_by)
+        VALUES (%s, %s, %s, %s, 'open', %s)
         RETURNING id, title, severity, status, created_at
         """,
-        (body.title, body.severity, body.service_id, user["id"]),
+        (body.title, body.severity, body.service_id, location_id, user["id"]),
     )
     execute(
         """
@@ -266,9 +340,10 @@ def create_incident(body: IncidentCreate, user=Depends(auth_user)):
 def list_incidents(_: dict = Depends(auth_user)):
     return query_all(
         """
-        SELECT i.id, i.title, i.severity, i.status, i.assignee_id, i.created_at, s.name as service_name
+        SELECT i.id, i.title, i.severity, i.status, i.assignee_id, i.created_at, s.name as service_name, l.code as location_code
         FROM incidents i
         LEFT JOIN services s ON s.id = i.service_id
+        LEFT JOIN locations l ON l.id = i.location_id
         ORDER BY i.created_at DESC
         LIMIT 200
         """
@@ -370,53 +445,83 @@ def resolve_incident(incident_id: int, user=Depends(auth_user)):
 
 
 @app.get("/topology")
-def topology(env: Optional[str] = "prod", _: dict = Depends(auth_user)):
+def topology(env: Optional[str] = "prod", location_code: Optional[str] = None, _: dict = Depends(auth_user)):
     try:
-        nodes = query_all(
-            """
-            SELECT
-                s.id as service_id,
-                s.name,
-                s.environment,
-                s.owner,
-                COALESCE(a.open_alerts, 0) as open_alerts,
-                COALESCE(a.alert_rank, 0) as alert_rank,
-                COALESCE(i.open_incidents, 0) as open_incidents,
-                COALESCE(i.incident_rank, 0) as incident_rank
-            FROM services s
-            LEFT JOIN (
+        if location_code:
+            nodes = query_all(
+                """
                 SELECT
-                    service_id,
-                    COUNT(*) as open_alerts,
+                    s.id as service_id,
+                    s.name,
+                    s.environment,
+                    s.owner,
+                    l.code as location_code,
+                    COALESCE(a.open_alerts, 0) as open_alerts,
+                    COALESCE(a.alert_rank, 0) as alert_rank,
+                    COALESCE(i.open_incidents, 0) as open_incidents,
+                    COALESCE(i.incident_rank, 0) as incident_rank
+                FROM services s
+                LEFT JOIN service_locations sl ON sl.service_id = s.id
+                LEFT JOIN locations l ON l.id = sl.location_id
+                LEFT JOIN (
+                    SELECT service_id, COUNT(*) as open_alerts,
                     MAX(CASE
                         WHEN LOWER(COALESCE(severity, '')) IN ('critical','disaster','p1') THEN 3
                         WHEN LOWER(COALESCE(severity, '')) IN ('high','error','p2') THEN 2
                         WHEN LOWER(COALESCE(severity, '')) IN ('warning','medium','warn','p3') THEN 1
-                        ELSE 0
-                    END) as alert_rank
-                FROM alert_events
-                WHERE status = 'open'
-                GROUP BY service_id
-            ) a ON a.service_id = s.id
-            LEFT JOIN (
-                SELECT
-                    service_id,
-                    COUNT(*) as open_incidents,
+                        ELSE 0 END) as alert_rank
+                    FROM alert_events WHERE status = 'open' GROUP BY service_id
+                ) a ON a.service_id = s.id
+                LEFT JOIN (
+                    SELECT service_id, COUNT(*) as open_incidents,
                     MAX(CASE
                         WHEN LOWER(COALESCE(severity, '')) IN ('critical','disaster','p1') THEN 3
                         WHEN LOWER(COALESCE(severity, '')) IN ('high','error','p2') THEN 2
                         WHEN LOWER(COALESCE(severity, '')) IN ('warning','medium','warn','p3') THEN 1
-                        ELSE 2
-                    END) as incident_rank
-                FROM incidents
-                WHERE status IN ('open', 'acked')
-                GROUP BY service_id
-            ) i ON i.service_id = s.id
-            WHERE s.environment = %s
-            ORDER BY s.name ASC
-            """,
-            (env,),
-        )
+                        ELSE 2 END) as incident_rank
+                    FROM incidents WHERE status IN ('open', 'acked') GROUP BY service_id
+                ) i ON i.service_id = s.id
+                WHERE s.environment = %s AND LOWER(COALESCE(l.code, '')) = %s
+                ORDER BY s.name ASC
+                """,
+                (env, location_code.strip().lower()),
+            )
+        else:
+            nodes = query_all(
+                """
+                SELECT
+                    s.id as service_id,
+                    s.name,
+                    s.environment,
+                    s.owner,
+                    COALESCE(a.open_alerts, 0) as open_alerts,
+                    COALESCE(a.alert_rank, 0) as alert_rank,
+                    COALESCE(i.open_incidents, 0) as open_incidents,
+                    COALESCE(i.incident_rank, 0) as incident_rank
+                FROM services s
+                LEFT JOIN (
+                    SELECT service_id, COUNT(*) as open_alerts,
+                    MAX(CASE
+                        WHEN LOWER(COALESCE(severity, '')) IN ('critical','disaster','p1') THEN 3
+                        WHEN LOWER(COALESCE(severity, '')) IN ('high','error','p2') THEN 2
+                        WHEN LOWER(COALESCE(severity, '')) IN ('warning','medium','warn','p3') THEN 1
+                        ELSE 0 END) as alert_rank
+                    FROM alert_events WHERE status = 'open' GROUP BY service_id
+                ) a ON a.service_id = s.id
+                LEFT JOIN (
+                    SELECT service_id, COUNT(*) as open_incidents,
+                    MAX(CASE
+                        WHEN LOWER(COALESCE(severity, '')) IN ('critical','disaster','p1') THEN 3
+                        WHEN LOWER(COALESCE(severity, '')) IN ('high','error','p2') THEN 2
+                        WHEN LOWER(COALESCE(severity, '')) IN ('warning','medium','warn','p3') THEN 1
+                        ELSE 2 END) as incident_rank
+                    FROM incidents WHERE status IN ('open', 'acked') GROUP BY service_id
+                ) i ON i.service_id = s.id
+                WHERE s.environment = %s
+                ORDER BY s.name ASC
+                """,
+                (env,),
+            )
     except Exception:
         nodes = []
 
@@ -442,7 +547,10 @@ def topology(env: Optional[str] = "prod", _: dict = Depends(auth_user)):
                 n.get("alert_rank", 0),
                 n.get("incident_rank", 0),
             ),
-            meta=f"owner: {n.get('owner') or 'unknown'}",
+            meta=(
+                f"owner: {n.get('owner') or 'unknown'}"
+                + (f" | location: {n.get('location_code')}" if n.get("location_code") else "")
+            ),
             open_alerts=n.get("open_alerts", 0),
             open_incidents=n.get("open_incidents", 0),
         ).model_dump()
@@ -459,15 +567,13 @@ def topology(env: Optional[str] = "prod", _: dict = Depends(auth_user)):
         for e in edges
     ]
 
-    # Dependency impact propagation (from_service depends on to_service).
     node_map = {n["service_id"]: dict(n) for n in base_nodes}
     impacted_by = {n["service_id"]: set() for n in base_nodes}
 
-    # keep soft mapping simple for now
     criticality_weight = {"critical": 2, "high": 2, "medium": 1, "low": 1}
     propagate_relations = {"runtime_call", "data_store", "cache_layer", "traffic_route", "depends_on"}
 
-    for _ in range(4):  # bounded propagation depth
+    for _ in range(4):
         changed = False
         for e in normalized_edges:
             from_id = e["from_service_id"]
@@ -586,12 +692,33 @@ def incident_rca(incident_id: int, _: dict = Depends(auth_user)):
     }
 
 
+@app.get("/locations")
+def list_locations(_: dict = Depends(auth_user)):
+    return query_all(
+        """
+        SELECT l.id, l.code, l.name, l.level, l.parent_id,
+               COUNT(DISTINCT sl.service_id) as services
+        FROM locations l
+        LEFT JOIN service_locations sl ON sl.location_id = l.id
+        GROUP BY l.id, l.code, l.name, l.level, l.parent_id
+        ORDER BY l.level, l.code
+        """
+    )
+
+
 @app.get("/summary")
 def summary(_: dict = Depends(auth_user)):
+    total_services = query_one("SELECT COUNT(*) as c FROM services")["c"]
+    services_with_location = query_one(
+        "SELECT COUNT(DISTINCT service_id) as c FROM service_locations"
+    )["c"]
     data = {
         "open_alerts": query_one("SELECT COUNT(*) as c FROM alert_events WHERE status = 'open'")["c"],
         "acked_alerts": query_one("SELECT COUNT(*) as c FROM alert_events WHERE status = 'acked'")["c"],
         "open_incidents": query_one("SELECT COUNT(*) as c FROM incidents WHERE status = 'open'")["c"],
         "resolved_incidents": query_one("SELECT COUNT(*) as c FROM incidents WHERE status = 'resolved'")["c"],
+        "total_services": total_services,
+        "services_with_location": services_with_location,
+        "location_coverage": round((services_with_location / total_services), 3) if total_services else 0,
     }
     return data
