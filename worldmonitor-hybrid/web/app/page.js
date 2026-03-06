@@ -28,11 +28,22 @@ export default async function DashboardPage({ searchParams }) {
     location === "all" ? topologyPromise : safeApiGet("/topology", { nodes: [], edges: [] });
 
   const locCodes = (locations || []).map((l) => l.code);
+  const topologyByCodePromise = new Map();
+  if (location !== "all") topologyByCodePromise.set(location, topologyPromise);
+
   const topologyByLocationPromise = Promise.all(
-    locCodes.map(async (code) => ({
-      code,
-      data: await safeApiGet(`/topology?location_code=${encodeURIComponent(code)}`, { nodes: [] }),
-    }))
+    locCodes.map(async (code) => {
+      if (!topologyByCodePromise.has(code)) {
+        topologyByCodePromise.set(
+          code,
+          safeApiGet(`/topology?location_code=${encodeURIComponent(code)}`, { nodes: [] })
+        );
+      }
+      return {
+        code,
+        data: await topologyByCodePromise.get(code),
+      };
+    })
   );
 
   const [topology, topologyGlobal, topologyByLocation, incidents, alerts] = await Promise.all([
