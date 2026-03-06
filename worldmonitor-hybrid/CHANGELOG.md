@@ -34,6 +34,7 @@
 
 ### Changed (latest rounds)
 - Tối ưu lớp gọi API bằng cache token ngắn hạn + chống login đồng thời, giảm overhead auth lặp lại khi Home fetch nhiều endpoint.
+- Tối ưu data flow Home: gom fetch topology/incidents/alerts chạy song song và tái sử dụng topology global khi đang ở chế độ `location=all` để tránh gọi API trùng.
 
 ### Added (latest rounds)
 - Thêm KPI card `Active regions` trên Home để thấy nhanh số khu vực đang có alert/incident.

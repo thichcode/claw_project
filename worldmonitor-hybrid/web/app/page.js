@@ -23,20 +23,29 @@ export default async function DashboardPage({ searchParams }) {
   const locations = await safeApiGet("/locations", []);
 
   const topologyPath = location === "all" ? "/topology" : `/topology?location_code=${encodeURIComponent(location)}`;
-  const topology = await safeApiGet(topologyPath, { nodes: [], edges: [] });
-  const topologyGlobal = await safeApiGet("/topology", { nodes: [], edges: [] });
+  const topologyPromise = safeApiGet(topologyPath, { nodes: [], edges: [] });
+  const topologyGlobalPromise =
+    location === "all" ? topologyPromise : safeApiGet("/topology", { nodes: [], edges: [] });
 
   const locCodes = (locations || []).map((l) => l.code);
-  const topologyByLocation = await Promise.all(
+  const topologyByLocationPromise = Promise.all(
     locCodes.map(async (code) => ({
       code,
       data: await safeApiGet(`/topology?location_code=${encodeURIComponent(code)}`, { nodes: [] }),
     }))
   );
 
+  const [topology, topologyGlobal, topologyByLocation, incidents, alerts] = await Promise.all([
+    topologyPromise,
+    topologyGlobalPromise,
+    topologyByLocationPromise,
+    safeApiGet("/incidents", []),
+    safeApiGet("/alerts", []),
+  ]);
+
   const hotspotRows = [...(topology.nodes || [])].sort((a, b) => hotspotScore(b) - hotspotScore(a)).slice(0, 8);
-  const rightIncidents = (await safeApiGet("/incidents", [])).slice(0, 8);
-  const leftAlerts = (await safeApiGet("/alerts", [])).slice(0, 12);
+  const rightIncidents = incidents.slice(0, 8);
+  const leftAlerts = alerts.slice(0, 12);
 
   const rangeFactor = range === "15m" ? 0.35 : range === "24h" ? 2.4 : 1;
   const estImpactedUsers = Math.round((summary.open_alerts * 230 + summary.open_incidents * 900) * rangeFactor);
