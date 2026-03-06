@@ -1,6 +1,10 @@
 const INTERNAL = process.env.API_URL_INTERNAL || "http://localhost:8000";
 const PUBLIC = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+let cachedToken = null;
+let cachedTokenExpireAt = 0;
+let inflightTokenPromise = null;
+
 async function login() {
   const r = await fetch(`${INTERNAL}/auth/login`, {
     method: "POST",
@@ -13,8 +17,27 @@ async function login() {
   return data.access_token;
 }
 
+async function getAuthToken() {
+  const now = Date.now();
+  if (cachedToken && now < cachedTokenExpireAt) return cachedToken;
+
+  if (!inflightTokenPromise) {
+    inflightTokenPromise = login()
+      .then((token) => {
+        cachedToken = token;
+        cachedTokenExpireAt = Date.now() + 55 * 1000;
+        return token;
+      })
+      .finally(() => {
+        inflightTokenPromise = null;
+      });
+  }
+
+  return inflightTokenPromise;
+}
+
 async function authHeaders() {
-  const token = await login();
+  const token = await getAuthToken();
   return {
     "Content-Type": "application/json",
     Authorization: `Bearer ${token}`,
