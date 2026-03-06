@@ -58,6 +58,7 @@
 - Home data flow: chuẩn hoá `range` từ URL về tập hợp hợp lệ (`15m/1h/24h`), fallback `1h` khi query param bẩn để tránh state/link lệch nhau.
 - Home data flow: nếu `location` trên URL không khớp danh sách `/locations` thì fallback về `all` để tránh gọi API theo mã location không hợp lệ.
 - Home: thêm nhãn "Locations" trước filter chips để nhóm khu vực rõ ràng hơn.
+- Home data flow: thêm fallback tính `Active regions` từ topology global khi `/locations` rỗng hoặc thiếu mã vùng, tránh KPI về 0 sai lệch.
 
 ### Added (latest rounds)
 - Thêm KPI card `Active regions` trên Home để thấy nhanh số khu vực đang có alert/incident.

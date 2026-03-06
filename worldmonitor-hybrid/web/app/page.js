@@ -25,6 +25,10 @@ function toSafeNumber(value) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function normalizeLocationCode(value) {
+  return String(value || "").trim();
+}
+
 export default async function DashboardPage({ searchParams }) {
   const locationParam = String(searchParams?.location || "all").trim();
   const warMode = String(searchParams?.war || "0") === "1";
@@ -108,11 +112,23 @@ export default async function DashboardPage({ searchParams }) {
   const estImpactedUsers = Math.round((summary.open_alerts * 230 + summary.open_incidents * 900) * rangeFactor);
   const estRevenueRisk = Math.round((summary.open_incidents * 1200 + summary.open_alerts * 180) * rangeFactor);
   const slaRisk = Math.min(99, Math.round((summary.open_incidents * 8 + summary.open_alerts * 2.3) * (warMode ? 1.2 : 1)));
-  const activeRegions = topologyByLocation.filter((item) =>
+  const activeRegionsFromLocationTopology = topologyByLocation.filter((item) =>
     ensureArray(item.data?.nodes).some(
       (n) => toSafeNumber(n?.open_alerts) > 0 || toSafeNumber(n?.open_incidents) > 0
     )
   ).length;
+
+  const activeRegionsFromGlobalTopology = new Set(
+    ensureArray(topologyGlobal?.nodes)
+      .filter((n) => toSafeNumber(n?.open_alerts) > 0 || toSafeNumber(n?.open_incidents) > 0)
+      .map((n) => normalizeLocationCode(n?.location_code))
+      .filter(Boolean)
+  ).size;
+
+  const activeRegions =
+    activeRegionsFromLocationTopology > 0
+      ? activeRegionsFromLocationTopology
+      : activeRegionsFromGlobalTopology;
 
   return (
     <main className={styles.shell}>
