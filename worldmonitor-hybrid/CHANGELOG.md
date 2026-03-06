@@ -41,6 +41,7 @@
 - Home data flow: tái sử dụng promise topology của location đang chọn khi dựng `topologyByLocation`, giảm 1 API call `/topology?location_code=...` bị trùng mỗi lần render.
 - Home: chuyển banner cảnh báo demo thành panel toggle để giảm clutter mà vẫn giữ cảnh báo rõ.
 - Home data flow: chuẩn hoá danh sách location code (dedupe + bỏ giá trị rỗng) và luôn giữ location đang chọn trong tập topology fetch để tránh thiếu dữ liệu khi filter thủ công qua URL.
+- Home: tinh gọn Quick Mode bar bằng pill link đồng nhất + highlight trạng thái đang bật để scan nhanh hơn.
 
 ### Added (latest rounds)
 - Thêm KPI card `Active regions` trên Home để thấy nhanh số khu vực đang có alert/incident.

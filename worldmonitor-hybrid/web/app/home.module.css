@@ -70,6 +70,43 @@
   opacity: .65;
 }
 
+.quickBar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  border: 1px solid #243049;
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: rgba(10,16,30,.75);
+}
+
+.quickLabel {
+  font-size: 12px;
+  color: #9fb3cd;
+}
+
+.quickSep {
+  color: #64748b;
+}
+
+.quickLink {
+  font-size: 12px;
+  color: #cbd5e1;
+  text-decoration: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  transition: border-color .2s ease, color .2s ease, opacity .2s ease;
+  opacity: .75;
+}
+
+.quickLinkActive {
+  opacity: 1;
+  border-color: rgba(56,189,248,.45);
+  color: #e2f1ff;
+}
+
 .fullMapStage {
   position: relative;
   min-height: 78vh;

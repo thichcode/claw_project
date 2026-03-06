@@ -117,19 +117,26 @@ export default async function DashboardPage({ searchParams }) {
           ))}
         </div>
 
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", border: "1px solid #243049", borderRadius: 10, padding: "8px 10px", background: "rgba(10,16,30,.75)" }}>
-          <strong style={{ fontSize: 12, color: "#9fb3cd" }}>Quick Mode</strong>
-          <a href={`/?location=${encodeURIComponent(location)}&range=${encodeURIComponent(range)}&war=${warMode ? "0" : "1"}`}>
+        <div className={styles.quickBar}>
+          <strong className={styles.quickLabel}>Quick Mode</strong>
+          <a
+            className={`${styles.quickLink} ${warMode ? styles.quickLinkActive : ""}`}
+            href={`/?location=${encodeURIComponent(location)}&range=${encodeURIComponent(range)}&war=${warMode ? "0" : "1"}`}
+          >
             {warMode ? "Disable War Mode" : "Enable War Mode"}
           </a>
-          <span style={{ color: "#64748b" }}>·</span>
-          <span style={{ fontSize: 12, color: "#9fb3cd" }}>Time Rewind:</span>
+          <span className={styles.quickSep}>·</span>
+          <span className={styles.quickLabel}>Time Rewind:</span>
           {[
             { k: "15m", t: "15m" },
             { k: "1h", t: "1h" },
             { k: "24h", t: "24h" },
           ].map((r) => (
-            <a key={r.k} href={`/?location=${encodeURIComponent(location)}&range=${r.k}&war=${warMode ? "1" : "0"}`} style={{ opacity: range === r.k ? 1 : 0.7 }}>
+            <a
+              key={r.k}
+              className={`${styles.quickLink} ${range === r.k ? styles.quickLinkActive : ""}`}
+              href={`/?location=${encodeURIComponent(location)}&range=${r.k}&war=${warMode ? "1" : "0"}`}
+            >
               {r.t}
             </a>
           ))}
