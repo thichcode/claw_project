@@ -26,7 +26,7 @@ function toSafeNumber(value) {
 }
 
 export default async function DashboardPage({ searchParams }) {
-  const location = searchParams?.location || "all";
+  const locationParam = String(searchParams?.location || "all").trim();
   const warMode = String(searchParams?.war || "0") === "1";
   const range = String(searchParams?.range || "1h");
   const summaryRaw = await safeApiGet("/summary", mockSummary);
@@ -47,6 +47,10 @@ export default async function DashboardPage({ searchParams }) {
         .filter(Boolean)
     ).values()
   );
+  const locationFromCatalog = normalizedLocations.find(
+    (item) => item.code.toLowerCase() === locationParam.toLowerCase()
+  )?.code;
+  const location = locationFromCatalog || locationParam || "all";
 
   const topologyPath = location === "all" ? "/topology" : `/topology?location_code=${encodeURIComponent(location)}`;
   const topologyPromise = safeApiGet(topologyPath, { nodes: [], edges: [] });

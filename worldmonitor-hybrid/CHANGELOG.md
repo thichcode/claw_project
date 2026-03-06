@@ -52,6 +52,7 @@
 - Home data flow: chuẩn hoá `topology.nodes[].open_alerts/open_incidents` về số an toàn khi tính hotspot + active regions để tránh lệch ranking/count nếu API trả string/null.
 - Home data flow: khi chọn location, Home chỉ fetch incidents/alerts theo `location_code` (thay vì toàn cục) để widget nổi phản ánh đúng khu vực đang focus.
 - Home: KPI grid chuyển sang auto-fit min width để bố cục gọn, không bị bó cứng 4 cột trên màn hình hẹp.
+- Home data flow: chuẩn hoá `location` từ URL theo danh sách `/locations` (match không phân biệt hoa/thường) để tránh gọi API sai mã location khi query param dùng khác casing.
 
 ### Added (latest rounds)
 - Thêm KPI card `Active regions` trên Home để thấy nhanh số khu vực đang có alert/incident.
