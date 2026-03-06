@@ -14,6 +14,10 @@ function hotspotScore(n) {
   return sev * 100 + (n.open_incidents || 0) * 30 + (n.open_alerts || 0) * 8;
 }
 
+function ensureArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
 export default async function DashboardPage({ searchParams }) {
   const location = searchParams?.location || "all";
   const warMode = String(searchParams?.war || "0") === "1";
@@ -61,7 +65,7 @@ export default async function DashboardPage({ searchParams }) {
     })
   );
 
-  const [topology, topologyGlobal, topologyByLocation, incidents, alerts] = await Promise.all([
+  const [topology, topologyGlobal, topologyByLocation, incidentsRaw, alertsRaw] = await Promise.all([
     topologyPromise,
     topologyGlobalPromise,
     topologyByLocationPromise,
@@ -69,7 +73,9 @@ export default async function DashboardPage({ searchParams }) {
     safeApiGet("/alerts", []),
   ]);
 
-  const hotspotRows = [...(topology.nodes || [])].sort((a, b) => hotspotScore(b) - hotspotScore(a)).slice(0, 8);
+  const incidents = ensureArray(incidentsRaw);
+  const alerts = ensureArray(alertsRaw);
+  const hotspotRows = ensureArray(topology?.nodes).sort((a, b) => hotspotScore(b) - hotspotScore(a)).slice(0, 8);
   const rightIncidents = incidents.slice(0, 8);
   const leftAlerts = alerts.slice(0, 12);
 
