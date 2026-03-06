@@ -16,7 +16,9 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
+  row-gap: 8px;
   background: linear-gradient(180deg, rgba(20,28,46,.95), rgba(10,16,30,.9));
   border: 1px solid #243049;
   border-radius: 12px;
