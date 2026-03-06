@@ -32,6 +32,12 @@
 - Dữ liệu topology/server/network hiện là demo-first để trình diễn UI/flow.
 - Khi chuyển production, thay fake server/IP và network metrics bằng dữ liệu thật từ DB/API.
 
+### Changed (latest rounds)
+- Tối ưu lớp gọi API bằng cache token ngắn hạn + chống login đồng thời, giảm overhead auth lặp lại khi Home fetch nhiều endpoint.
+
+### Added (latest rounds)
+- Thêm KPI card `Active regions` trên Home để thấy nhanh số khu vực đang có alert/incident.
+
 ---
 
 ## Changelog policy
