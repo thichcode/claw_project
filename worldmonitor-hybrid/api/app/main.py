@@ -692,6 +692,27 @@ def incident_rca(incident_id: int, _: dict = Depends(auth_user)):
     }
 
 
+@app.post("/demo/reset")
+def demo_reset(user=Depends(auth_user)):
+    # demo-only bulk reset to make presets clearly visible
+    execute(
+        """
+        UPDATE alert_events
+        SET status='acked', acked_by=%s, acked_note='demo reset', acked_at=NOW(), updated_at=NOW()
+        WHERE status='open'
+        """,
+        (user["id"],),
+    )
+    execute(
+        """
+        UPDATE incidents
+        SET status='resolved', resolved_at=NOW(), updated_at=NOW()
+        WHERE status IN ('open','acked')
+        """
+    )
+    return {"ok": True}
+
+
 @app.get("/locations")
 def list_locations(_: dict = Depends(auth_user)):
     return query_all(

@@ -6,14 +6,14 @@ export const mockSummary = {
 };
 
 export const mockAlerts = [
-  { id: 901, source: "zabbix", severity: "critical", title: "Keycloak latency p95 > 2s", status: "open", service_name: "keycloak" },
-  { id: 902, source: "alertmanager", severity: "warning", title: "Kafka backlog increased", status: "open", service_name: "data-pipeline" },
-  { id: 903, source: "uptimerobot", severity: "high", title: "API gateway 5xx above SLO", status: "acked", service_name: "api-gateway" },
+  { id: 901, source: "zabbix", severity: "critical", title: "Keycloak latency p95 > 2s", status: "open", service_name: "keycloak", location_code: "hcm-dc1" },
+  { id: 902, source: "alertmanager", severity: "warning", title: "Kafka backlog increased", status: "open", service_name: "data-pipeline", location_code: "sgp-az1" },
+  { id: 903, source: "uptimerobot", severity: "high", title: "API gateway 5xx above SLO", status: "acked", service_name: "api-gateway", location_code: "hcm-dc1" },
 ];
 
 export const mockIncidents = [
-  { id: 301, title: "Login failures & latency spike", severity: "critical", status: "open", assignee_id: 2, service_name: "keycloak", created_at: "2026-03-04T15:05:00Z" },
-  { id: 302, title: "Queue lag on data platform", severity: "high", status: "acked", assignee_id: 1, service_name: "data-pipeline", created_at: "2026-03-04T14:44:00Z" },
+  { id: 301, title: "Login failures & latency spike", severity: "critical", status: "open", assignee_id: 2, service_name: "keycloak", location_code: "hcm-dc1", created_at: "2026-03-04T15:05:00Z" },
+  { id: 302, title: "Queue lag on data platform", severity: "high", status: "acked", assignee_id: 1, service_name: "data-pipeline", location_code: "sgp-az1", created_at: "2026-03-04T14:44:00Z" },
 ];
 
 export const mockIncidentDetail = {

@@ -7,12 +7,24 @@ const topologyFallback = {
   kpi: { affected_services: 0, critical_edges: 0, blast_radius: "Low" },
 };
 
-export default async function TopologyPage() {
-  const topology = await safeApiGet("/topology", topologyFallback);
+export default async function TopologyPage({ searchParams }) {
+  const location = searchParams?.location;
+  const locations = await safeApiGet("/locations", []);
+  const path = location ? `/topology?location_code=${encodeURIComponent(location)}` : "/topology";
+  const topology = await safeApiGet(path, topologyFallback);
 
   return (
     <main>
       <PageHeader title="Service Topology" subtitle="Dependency graph and blast-radius analysis" />
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+        <a href="/topology" style={{ opacity: !location ? 1 : 0.75 }}>All locations</a>
+        {(locations || []).map((l) => (
+          <a key={l.code} href={`/topology?location=${encodeURIComponent(l.code)}`} style={{ opacity: location === l.code ? 1 : 0.75 }}>
+            {l.code}
+          </a>
+        ))}
+      </div>
 
       <div className="wm-grid-2">
         <PanelCard>
