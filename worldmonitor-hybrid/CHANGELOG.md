@@ -55,6 +55,7 @@
 - Home: topbar cho phép wrap trên màn hình hẹp để giữ layout sạch.
 - Home data flow: chuẩn hoá `location` từ URL theo danh sách `/locations` (match không phân biệt hoa/thường) để tránh gọi API sai mã location khi query param dùng khác casing.
 - Home data flow: chuẩn hoá `range` từ URL về tập hợp hợp lệ (`15m/1h/24h`), fallback `1h` khi query param bẩn để tránh state/link lệch nhau.
+- Home: thêm nhãn "Locations" trước filter chips để nhóm khu vực rõ ràng hơn.
 
 ### Added (latest rounds)
 - Thêm KPI card `Active regions` trên Home để thấy nhanh số khu vực đang có alert/incident.

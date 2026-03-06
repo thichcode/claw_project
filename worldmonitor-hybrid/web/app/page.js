@@ -139,6 +139,7 @@ export default async function DashboardPage({ searchParams }) {
       </details>
 
       <div className={styles.controlStack}>
+        <div className={styles.sectionLabel}>Locations</div>
         <div className={styles.locationLinks}>
           <a
             href={`/?range=${encodeURIComponent(range)}&war=${warMode ? "1" : "0"}`}
