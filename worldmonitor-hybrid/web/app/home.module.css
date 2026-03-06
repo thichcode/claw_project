@@ -90,6 +90,60 @@
   letter-spacing: .5px;
 }
 
+.foldPanel {
+  border: 1px solid #243049;
+  border-radius: 10px;
+  background: rgba(10,16,30,.75);
+  padding: 6px 10px 10px;
+}
+
+.foldSummary {
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  color: #9fb3cd;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+}
+
+.foldSummary::-webkit-details-marker {
+  display: none;
+}
+
+.foldPill {
+  font-size: 10px;
+  background: rgba(56,189,248,.15);
+  color: #bae6fd;
+  border: 1px solid rgba(56,189,248,.35);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.foldBody {
+  margin-top: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.foldRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: #cbd5e1;
+  border-top: 1px dashed #243049;
+  padding-top: 6px;
+}
+
+.foldRow strong {
+  color: #e2f1ff;
+  font-weight: 700;
+}
+
 .feedList {
   display: grid;
   gap: 8px;

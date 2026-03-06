@@ -37,6 +37,7 @@
 - Tối ưu data flow Home: gom fetch topology/incidents/alerts chạy song song và tái sử dụng topology global khi đang ở chế độ `location=all` để tránh gọi API trùng.
 - Home: chuyển filter location thành pill chips rõ trạng thái active/inactive để dễ scan.
 - Bổ sung retry 1 lần khi API trả `401` (auto reset token + login lại) để Home giảm lỗi rớt dữ liệu khi token hết hạn giữa lúc fetch nhiều endpoint.
+- Home: thêm panel "Operational Notes" có toggle ẩn/hiện để recap nhanh blast radius + revenue exposure.
 
 ### Added (latest rounds)
 - Thêm KPI card `Active regions` trên Home để thấy nhanh số khu vực đang có alert/incident.

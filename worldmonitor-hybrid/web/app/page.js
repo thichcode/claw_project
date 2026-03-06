@@ -132,6 +132,27 @@ export default async function DashboardPage({ searchParams }) {
           </div>
         </div>
 
+        <details className={styles.foldPanel} open>
+          <summary className={styles.foldSummary}>
+            <span>Operational Notes</span>
+            <span className={styles.foldPill}>Auto</span>
+          </summary>
+          <div className={styles.foldBody}>
+            <div className={styles.foldRow}>
+              <span>Active regions with alerts</span>
+              <strong>{activeRegions}</strong>
+            </div>
+            <div className={styles.foldRow}>
+              <span>Estimated blast radius</span>
+              <strong>{estImpactedUsers.toLocaleString()} users</strong>
+            </div>
+            <div className={styles.foldRow}>
+              <span>Revenue exposure</span>
+              <strong>${estRevenueRisk.toLocaleString()}/hr</strong>
+            </div>
+          </div>
+        </details>
+
         <WidgetControlsBar />
         <SimulateControls />
       </div>
