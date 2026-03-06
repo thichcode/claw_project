@@ -42,6 +42,9 @@ export default async function DashboardPage({ searchParams }) {
   const estImpactedUsers = Math.round((summary.open_alerts * 230 + summary.open_incidents * 900) * rangeFactor);
   const estRevenueRisk = Math.round((summary.open_incidents * 1200 + summary.open_alerts * 180) * rangeFactor);
   const slaRisk = Math.min(99, Math.round((summary.open_incidents * 8 + summary.open_alerts * 2.3) * (warMode ? 1.2 : 1)));
+  const activeRegions = topologyByLocation.filter((item) =>
+    (item.data?.nodes || []).some((n) => (n.open_alerts || 0) > 0 || (n.open_incidents || 0) > 0)
+  ).length;
 
   return (
     <main className={styles.shell}>
@@ -92,7 +95,7 @@ export default async function DashboardPage({ searchParams }) {
           ))}
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(160px,1fr))", gap: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(150px,1fr))", gap: 8 }}>
           <div style={{ border: "1px solid #243049", borderRadius: 10, padding: 8, background: "rgba(10,16,30,.75)" }}>
             <div style={{ fontSize: 11, color: "#8ea3be" }}>Estimated impacted users</div>
             <div style={{ fontWeight: 800, color: "#dbeafe" }}>{estImpactedUsers.toLocaleString()}</div>
@@ -104,6 +107,10 @@ export default async function DashboardPage({ searchParams }) {
           <div style={{ border: "1px solid #243049", borderRadius: 10, padding: 8, background: "rgba(10,16,30,.75)" }}>
             <div style={{ fontSize: 11, color: "#8ea3be" }}>SLA breach risk</div>
             <div style={{ fontWeight: 800, color: slaRisk > 50 ? "#fca5a5" : "#fde68a" }}>{slaRisk}%</div>
+          </div>
+          <div style={{ border: "1px solid #243049", borderRadius: 10, padding: 8, background: "rgba(10,16,30,.75)" }}>
+            <div style={{ fontSize: 11, color: "#8ea3be" }}>Active regions</div>
+            <div style={{ fontWeight: 800, color: activeRegions > 0 ? "#93c5fd" : "#a7f3d0" }}>{activeRegions}</div>
           </div>
         </div>
 
