@@ -128,7 +128,7 @@ export default async function DashboardPage({ searchParams }) {
         </div>
       </details>
 
-      <div style={{ display: "grid", gap: 10 }}>
+      <div className={styles.controlStack}>
         <div className={styles.locationLinks}>
           <a
             href={`/?range=${encodeURIComponent(range)}&war=${warMode ? "1" : "0"}`}
