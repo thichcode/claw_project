@@ -33,6 +33,7 @@
 - Khi chuyển production, thay fake server/IP và network metrics bằng dữ liệu thật từ DB/API.
 
 ### Changed (latest rounds)
+- Home: thêm nhãn "Key KPI Snapshot" để nhóm KPI rõ ràng hơn khi quét nhanh.
 - Tối ưu lớp gọi API bằng cache token ngắn hạn + chống login đồng thời, giảm overhead auth lặp lại khi Home fetch nhiều endpoint.
 - Tối ưu data flow Home: gom fetch topology/incidents/alerts chạy song song và tái sử dụng topology global khi đang ở chế độ `location=all` để tránh gọi API trùng.
 - Home: chuyển filter location thành pill chips rõ trạng thái active/inactive để dễ scan.

@@ -212,6 +212,7 @@ export default async function DashboardPage({ searchParams }) {
           ))}
         </div>
 
+        <div className={styles.sectionLabel}>Key KPI Snapshot</div>
         <div className={styles.metricGrid}>
           <div className={styles.metricCard}>
             <div className={styles.metricLabel}>Estimated impacted users</div>
