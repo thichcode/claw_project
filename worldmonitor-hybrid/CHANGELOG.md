@@ -44,6 +44,7 @@
 - Home: tinh gọn Quick Mode bar bằng pill link đồng nhất + highlight trạng thái đang bật để scan nhanh hơn.
 - Home data flow: chuẩn hoá danh sách location từ API `/locations` (trim + bỏ rỗng + dedupe) và tái sử dụng chung cho cả location chips lẫn topology fetch để tránh gọi trùng/hiển thị lặp khi dữ liệu nguồn bẩn.
 - Home: gom style KPI cards thành class riêng để đồng nhất spacing/typography, giảm inline noise.
+- Home: tăng khoảng cách trong KPI cards để nhãn/giá trị dễ quét hơn.
 - Home data flow: harden dữ liệu incidents/alerts/topology nodes bằng `ensureArray` trước khi slice/sort để tránh vỡ trang khi API trả về sai kiểu tạm thời.
 
 ### Added (latest rounds)

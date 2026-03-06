@@ -118,6 +118,8 @@
   border-radius: 10px;
   padding: 8px;
   background: rgba(10,16,30,.75);
+  display: grid;
+  gap: 4px;
 }
 
 .metricLabel {
