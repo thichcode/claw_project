@@ -21,6 +21,16 @@ export default async function DashboardPage({ searchParams }) {
   const summaryRaw = await safeApiGet("/summary", mockSummary);
   const summary = { ...mockSummary, ...(summaryRaw || {}) };
   const locations = await safeApiGet("/locations", []);
+  const normalizedLocations = Array.from(
+    new Map(
+      (locations || [])
+        .map((item) => {
+          const code = String(item?.code || "").trim();
+          return code ? [code, { ...item, code }] : null;
+        })
+        .filter(Boolean)
+    ).values()
+  );
 
   const topologyPath = location === "all" ? "/topology" : `/topology?location_code=${encodeURIComponent(location)}`;
   const topologyPromise = safeApiGet(topologyPath, { nodes: [], edges: [] });
@@ -29,7 +39,7 @@ export default async function DashboardPage({ searchParams }) {
 
   const locCodes = Array.from(
     new Set([
-      ...(locations || []).map((l) => l.code).filter(Boolean),
+      ...normalizedLocations.map((l) => l.code),
       ...(location !== "all" ? [location] : []),
     ])
   );
@@ -106,7 +116,7 @@ export default async function DashboardPage({ searchParams }) {
           >
             Global
           </a>
-          {(locations || []).map((l) => (
+          {normalizedLocations.map((l) => (
             <a
               key={l.code}
               href={`/?location=${encodeURIComponent(l.code)}&range=${encodeURIComponent(range)}&war=${warMode ? "1" : "0"}`}
