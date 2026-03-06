@@ -46,6 +46,7 @@
 - Home: gom style KPI cards thành class riêng để đồng nhất spacing/typography, giảm inline noise.
 - Home: tăng khoảng cách trong KPI cards để nhãn/giá trị dễ quét hơn.
 - Home data flow: harden dữ liệu incidents/alerts/topology nodes bằng `ensureArray` trước khi slice/sort để tránh vỡ trang khi API trả về sai kiểu tạm thời.
+- Home data flow: chuẩn hoá `summary.open_alerts/open_incidents` về số an toàn (fallback 0) để tránh NaN KPI khi API tạm trả string/null.
 
 ### Added (latest rounds)
 - Thêm KPI card `Active regions` trên Home để thấy nhanh số khu vực đang có alert/incident.

@@ -18,12 +18,22 @@ function ensureArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function toSafeNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
 export default async function DashboardPage({ searchParams }) {
   const location = searchParams?.location || "all";
   const warMode = String(searchParams?.war || "0") === "1";
   const range = String(searchParams?.range || "1h");
   const summaryRaw = await safeApiGet("/summary", mockSummary);
-  const summary = { ...mockSummary, ...(summaryRaw || {}) };
+  const summary = {
+    ...mockSummary,
+    ...(summaryRaw || {}),
+    open_alerts: toSafeNumber(summaryRaw?.open_alerts ?? mockSummary.open_alerts),
+    open_incidents: toSafeNumber(summaryRaw?.open_incidents ?? mockSummary.open_incidents),
+  };
   const locations = await safeApiGet("/locations", []);
   const normalizedLocations = Array.from(
     new Map(
