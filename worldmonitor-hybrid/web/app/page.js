@@ -28,7 +28,8 @@ function toSafeNumber(value) {
 export default async function DashboardPage({ searchParams }) {
   const locationParam = String(searchParams?.location || "all").trim();
   const warMode = String(searchParams?.war || "0") === "1";
-  const range = String(searchParams?.range || "1h");
+  const rangeParam = String(searchParams?.range || "1h").trim();
+  const range = ["15m", "1h", "24h"].includes(rangeParam) ? rangeParam : "1h";
   const summaryRaw = await safeApiGet("/summary", mockSummary);
   const summary = {
     ...mockSummary,
