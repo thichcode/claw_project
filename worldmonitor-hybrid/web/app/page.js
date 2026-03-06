@@ -77,12 +77,17 @@ export default async function DashboardPage({ searchParams }) {
     })
   );
 
+  const incidentsPath =
+    location === "all" ? "/incidents" : `/incidents?location_code=${encodeURIComponent(location)}`;
+  const alertsPath =
+    location === "all" ? "/alerts" : `/alerts?location_code=${encodeURIComponent(location)}`;
+
   const [topology, topologyGlobal, topologyByLocation, incidentsRaw, alertsRaw] = await Promise.all([
     topologyPromise,
     topologyGlobalPromise,
     topologyByLocationPromise,
-    safeApiGet("/incidents", []),
-    safeApiGet("/alerts", []),
+    safeApiGet(incidentsPath, []),
+    safeApiGet(alertsPath, []),
   ]);
 
   const incidents = ensureArray(incidentsRaw);

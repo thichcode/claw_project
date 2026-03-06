@@ -262,28 +262,31 @@ def ingest_uptimerobot(body: IngestEvent):
 
 
 @app.get("/alerts")
-def list_alerts(status: Optional[str] = None, _: dict = Depends(auth_user)):
+def list_alerts(status: Optional[str] = None, location_code: Optional[str] = None, _: dict = Depends(auth_user)):
+    filters = []
+    params = []
+
     if status:
-        return query_all(
-            """
-            SELECT a.id, a.source, a.severity, a.title, a.status, a.created_at, s.name as service_name, l.code as location_code
-            FROM alert_events a
-            LEFT JOIN services s ON s.id = a.service_id
-            LEFT JOIN locations l ON l.id = a.location_id
-            WHERE a.status = %s
-            ORDER BY a.created_at DESC
-            """,
-            (status,),
-        )
+        filters.append("a.status = %s")
+        params.append(status)
+
+    if location_code:
+        filters.append("LOWER(COALESCE(l.code, '')) = %s")
+        params.append(location_code.strip().lower())
+
+    where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+
     return query_all(
-        """
+        f"""
         SELECT a.id, a.source, a.severity, a.title, a.status, a.created_at, s.name as service_name, l.code as location_code
         FROM alert_events a
         LEFT JOIN services s ON s.id = a.service_id
         LEFT JOIN locations l ON l.id = a.location_id
+        {where_clause}
         ORDER BY a.created_at DESC
         LIMIT 200
-        """
+        """,
+        tuple(params),
     )
 
 
@@ -337,16 +340,27 @@ def create_incident(body: IncidentCreate, user=Depends(auth_user)):
 
 
 @app.get("/incidents")
-def list_incidents(_: dict = Depends(auth_user)):
+def list_incidents(location_code: Optional[str] = None, _: dict = Depends(auth_user)):
+    filters = []
+    params = []
+
+    if location_code:
+        filters.append("LOWER(COALESCE(l.code, '')) = %s")
+        params.append(location_code.strip().lower())
+
+    where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+
     return query_all(
-        """
+        f"""
         SELECT i.id, i.title, i.severity, i.status, i.assignee_id, i.created_at, s.name as service_name, l.code as location_code
         FROM incidents i
         LEFT JOIN services s ON s.id = i.service_id
         LEFT JOIN locations l ON l.id = i.location_id
+        {where_clause}
         ORDER BY i.created_at DESC
         LIMIT 200
-        """
+        """,
+        tuple(params),
     )
 
 
