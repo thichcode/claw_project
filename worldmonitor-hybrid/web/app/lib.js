@@ -44,9 +44,21 @@ async function authHeaders() {
   };
 }
 
+function resetCachedToken() {
+  cachedToken = null;
+  cachedTokenExpireAt = 0;
+}
+
 export async function apiGet(path) {
   const headers = await authHeaders();
-  const r = await fetch(`${INTERNAL}${path}`, { headers, cache: "no-store" });
+  let r = await fetch(`${INTERNAL}${path}`, { headers, cache: "no-store" });
+
+  if (r.status === 401) {
+    resetCachedToken();
+    const retryHeaders = await authHeaders();
+    r = await fetch(`${INTERNAL}${path}`, { headers: retryHeaders, cache: "no-store" });
+  }
+
   if (!r.ok) throw new Error(`api error: ${path}`);
   return r.json();
 }
@@ -61,12 +73,24 @@ export async function safeApiGet(path, fallbackData) {
 
 export async function apiPost(path, payload = {}) {
   const headers = await authHeaders();
-  const r = await fetch(`${INTERNAL}${path}`, {
+  let r = await fetch(`${INTERNAL}${path}`, {
     method: "POST",
     headers,
     body: JSON.stringify(payload),
     cache: "no-store",
   });
+
+  if (r.status === 401) {
+    resetCachedToken();
+    const retryHeaders = await authHeaders();
+    r = await fetch(`${INTERNAL}${path}`, {
+      method: "POST",
+      headers: retryHeaders,
+      body: JSON.stringify(payload),
+      cache: "no-store",
+    });
+  }
+
   if (!r.ok) throw new Error(`api post error: ${path}`);
   return r.json();
 }
