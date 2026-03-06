@@ -54,6 +54,7 @@
 - Home data flow: khi chọn location, Home chỉ fetch incidents/alerts theo `location_code` (thay vì toàn cục) để widget nổi phản ánh đúng khu vực đang focus.
 - Home: KPI grid chuyển sang auto-fit min width để bố cục gọn, không bị bó cứng 4 cột trên màn hình hẹp.
 - Home: topbar cho phép wrap trên màn hình hẹp để giữ layout sạch.
+- Home: thêm nền pill cho cụm Auto Refresh + status badge để nhóm thông tin trạng thái rõ ràng hơn.
 - Home data flow: chuẩn hoá `location` từ URL theo danh sách `/locations` (match không phân biệt hoa/thường) để tránh gọi API sai mã location khi query param dùng khác casing.
 - Home data flow: chuẩn hoá `range` từ URL về tập hợp hợp lệ (`15m/1h/24h`), fallback `1h` khi query param bẩn để tránh state/link lệch nhau.
 - Home data flow: nếu `location` trên URL không khớp danh sách `/locations` thì fallback về `all` để tránh gọi API theo mã location không hợp lệ.

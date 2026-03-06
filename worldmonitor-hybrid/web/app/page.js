@@ -140,7 +140,7 @@ export default async function DashboardPage({ searchParams }) {
             <div className={styles.sub}>location → service health intelligence</div>
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div className={styles.topbarStats}>
           <AutoRefresh seconds={8} />
           <StatusBadge status={`critical ${summary.open_alerts || 0}`} />
           <StatusBadge status={`open incidents ${summary.open_incidents || 0}`} />
