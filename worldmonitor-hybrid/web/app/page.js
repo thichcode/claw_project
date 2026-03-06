@@ -83,9 +83,15 @@ export default async function DashboardPage({ searchParams }) {
         </div>
       </div>
 
-      <div style={{ border: "1px dashed #7c2d12", background: "rgba(127,29,29,.22)", color: "#fecaca", borderRadius: 10, padding: "6px 10px", fontSize: 12 }}>
-        ⚠ SIMULATED / ESTIMATED DATA (demo mode) — không dùng để ra quyết định production.
-      </div>
+      <details className={styles.noticePanel} open>
+        <summary className={styles.noticeSummary}>
+          <span>Demo data notice</span>
+          <span className={styles.noticePill}>Simulated</span>
+        </summary>
+        <div className={styles.noticeBody}>
+          ⚠ SIMULATED / ESTIMATED DATA (demo mode) — không dùng để ra quyết định production.
+        </div>
+      </details>
 
       <div style={{ display: "grid", gap: 10 }}>
         <div className={styles.locationLinks}>
