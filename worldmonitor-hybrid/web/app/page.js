@@ -29,6 +29,10 @@ function normalizeLocationCode(value) {
   return String(value || "").trim();
 }
 
+function normalizeLocationKey(value) {
+  return normalizeLocationCode(value).toLowerCase();
+}
+
 export default async function DashboardPage({ searchParams }) {
   const locationParam = String(searchParams?.location || "all").trim();
   const warMode = String(searchParams?.war || "0") === "1";
@@ -46,14 +50,15 @@ export default async function DashboardPage({ searchParams }) {
     new Map(
       (locations || [])
         .map((item) => {
-          const code = String(item?.code || "").trim();
-          return code ? [code, { ...item, code }] : null;
+          const code = normalizeLocationCode(item?.code);
+          const key = normalizeLocationKey(code);
+          return key ? [key, { ...item, code }] : null;
         })
         .filter(Boolean)
     ).values()
   );
   const locationFromCatalog = normalizedLocations.find(
-    (item) => item.code.toLowerCase() === locationParam.toLowerCase()
+    (item) => normalizeLocationKey(item.code) === normalizeLocationKey(locationParam)
   )?.code;
   const location =
     locationParam.toLowerCase() === "all"
@@ -66,10 +71,15 @@ export default async function DashboardPage({ searchParams }) {
     location === "all" ? topologyPromise : safeApiGet("/topology", { nodes: [], edges: [] });
 
   const locCodes = Array.from(
-    new Set([
-      ...normalizedLocations.map((l) => l.code),
-      ...(location !== "all" ? [location] : []),
-    ])
+    new Map(
+      [...normalizedLocations.map((l) => l.code), ...(location !== "all" ? [location] : [])]
+        .map((code) => {
+          const normalizedCode = normalizeLocationCode(code);
+          const key = normalizeLocationKey(normalizedCode);
+          return key ? [key, normalizedCode] : null;
+        })
+        .filter(Boolean)
+    ).values()
   );
   const topologyByCodePromise = new Map();
   if (location !== "all") topologyByCodePromise.set(location, topologyPromise);
