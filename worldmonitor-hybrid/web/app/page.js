@@ -152,22 +152,22 @@ export default async function DashboardPage({ searchParams }) {
           ))}
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(150px,1fr))", gap: 8 }}>
-          <div style={{ border: "1px solid #243049", borderRadius: 10, padding: 8, background: "rgba(10,16,30,.75)" }}>
-            <div style={{ fontSize: 11, color: "#8ea3be" }}>Estimated impacted users</div>
-            <div style={{ fontWeight: 800, color: "#dbeafe" }}>{estImpactedUsers.toLocaleString()}</div>
+        <div className={styles.metricGrid}>
+          <div className={styles.metricCard}>
+            <div className={styles.metricLabel}>Estimated impacted users</div>
+            <div className={styles.metricValue} style={{ color: "#dbeafe" }}>{estImpactedUsers.toLocaleString()}</div>
           </div>
-          <div style={{ border: "1px solid #243049", borderRadius: 10, padding: 8, background: "rgba(10,16,30,.75)" }}>
-            <div style={{ fontSize: 11, color: "#8ea3be" }}>Revenue risk (USD/hr)</div>
-            <div style={{ fontWeight: 800, color: "#fecaca" }}>${estRevenueRisk.toLocaleString()}</div>
+          <div className={styles.metricCard}>
+            <div className={styles.metricLabel}>Revenue risk (USD/hr)</div>
+            <div className={styles.metricValue} style={{ color: "#fecaca" }}>${estRevenueRisk.toLocaleString()}</div>
           </div>
-          <div style={{ border: "1px solid #243049", borderRadius: 10, padding: 8, background: "rgba(10,16,30,.75)" }}>
-            <div style={{ fontSize: 11, color: "#8ea3be" }}>SLA breach risk</div>
-            <div style={{ fontWeight: 800, color: slaRisk > 50 ? "#fca5a5" : "#fde68a" }}>{slaRisk}%</div>
+          <div className={styles.metricCard}>
+            <div className={styles.metricLabel}>SLA breach risk</div>
+            <div className={styles.metricValue} style={{ color: slaRisk > 50 ? "#fca5a5" : "#fde68a" }}>{slaRisk}%</div>
           </div>
-          <div style={{ border: "1px solid #243049", borderRadius: 10, padding: 8, background: "rgba(10,16,30,.75)" }}>
-            <div style={{ fontSize: 11, color: "#8ea3be" }}>Active regions</div>
-            <div style={{ fontWeight: 800, color: activeRegions > 0 ? "#93c5fd" : "#a7f3d0" }}>{activeRegions}</div>
+          <div className={styles.metricCard}>
+            <div className={styles.metricLabel}>Active regions</div>
+            <div className={styles.metricValue} style={{ color: activeRegions > 0 ? "#93c5fd" : "#a7f3d0" }}>{activeRegions}</div>
           </div>
         </div>
 
