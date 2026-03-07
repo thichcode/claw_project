@@ -238,7 +238,10 @@ async def parse_ingest_payload(request: Request) -> dict:
     content_type = (request.headers.get("content-type") or "").lower()
 
     if "application/json" in content_type:
-        payload = await request.json()
+        try:
+            payload = await request.json()
+        except Exception:
+            raise HTTPException(status_code=422, detail="Malformed JSON body")
         if isinstance(payload, dict):
             return payload
         return {"payload": payload}

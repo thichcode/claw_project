@@ -3,6 +3,7 @@
 ## 2026-03-07
 
 ### Changed
+- API ingest: harden parser JSON cho các webhook ingest (`/ingest/zabbix`, `/ingest/alertmanager`, `/ingest/uptimerobot`) — payload `Content-Type: application/json` nhưng body lỗi cú pháp giờ trả `422 Malformed JSON body` thay vì rơi exception thành `500`, giúp client debug đúng lỗi input.
 - Home: thêm pill hiển thị data window ngay trong topbar trạng thái để thấy nhanh cửa sổ dữ liệu backend khi TV mode hoặc rollout live.
 - API ingest: chống tạo trùng `services` khi webhook gửi cùng service name khác chữ hoa/thường (ví dụ `API-Gateway` vs `api-gateway`) bằng cách resolve service theo `LOWER(name)`; giúp dữ liệu topology/summary ổn định hơn và tránh phình service ảo.
 - API incidents: harden `POST /incidents` để validate `service_id` tồn tại trước khi insert; trả `422 Invalid service_id` thay vì để lỗi foreign-key rơi thành 500, giúp API rõ ràng hơn khi client gửi id dịch vụ không hợp lệ.
