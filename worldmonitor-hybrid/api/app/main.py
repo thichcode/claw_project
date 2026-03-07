@@ -292,17 +292,27 @@ def list_alerts(status: Optional[str] = None, location_code: Optional[str] = Non
 
 @app.post("/alerts/{alert_id}/ack")
 def ack_alert(alert_id: int, body: AckRequest, user=Depends(auth_user)):
+    alert = query_one("SELECT id, status, acked_at FROM alert_events WHERE id = %s", (alert_id,))
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    current_status = str(alert.get("status") or "").lower()
+    if current_status == "acked":
+        return alert
+    if current_status != "open":
+        raise HTTPException(status_code=409, detail="Alert is not in open state")
+
     row = execute(
         """
         UPDATE alert_events
         SET status = 'acked', acked_by = %s, acked_note = %s, acked_at = NOW(), updated_at = NOW()
-        WHERE id = %s
+        WHERE id = %s AND status = 'open'
         RETURNING id, status, acked_at
         """,
         (user["id"], body.ack_note, alert_id),
     )
     if not row:
-        raise HTTPException(status_code=404, detail="Alert not found")
+        raise HTTPException(status_code=409, detail="Alert is not in open state")
     return row
 
 
