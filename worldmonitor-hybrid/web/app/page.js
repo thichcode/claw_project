@@ -208,6 +208,9 @@ export default async function DashboardPage({ searchParams }) {
             </a>
           ))}
         </div>
+        {normalizedLocations.length === 0 && (
+          <div className={styles.locationHint}>No location data yet — showing Global only.</div>
+        )}
 
         <div className={styles.quickBar}>
           <strong className={styles.quickLabel}>Quick Mode</strong>
