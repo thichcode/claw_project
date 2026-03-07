@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-03-07
+
+### Changed
+- Home: chuyển Key KPI Snapshot thành panel có toggle ẩn/hiện để bố cục gọn hơn khi cần tập trung.
+
 ## 2026-03-06
 
 ### Added

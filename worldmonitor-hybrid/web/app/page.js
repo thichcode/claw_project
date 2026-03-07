@@ -212,25 +212,30 @@ export default async function DashboardPage({ searchParams }) {
           ))}
         </div>
 
-        <div className={styles.sectionLabel}>Key KPI Snapshot</div>
-        <div className={styles.metricGrid}>
-          <div className={styles.metricCard}>
-            <div className={styles.metricLabel}>Estimated impacted users</div>
-            <div className={styles.metricValue} style={{ color: "#dbeafe" }}>{estImpactedUsers.toLocaleString()}</div>
+        <details className={styles.foldPanel} open>
+          <summary className={styles.foldSummary}>
+            <span>Key KPI Snapshot</span>
+            <span className={styles.foldPill}>Live</span>
+          </summary>
+          <div className={styles.metricGrid}>
+            <div className={styles.metricCard}>
+              <div className={styles.metricLabel}>Estimated impacted users</div>
+              <div className={styles.metricValue} style={{ color: "#dbeafe" }}>{estImpactedUsers.toLocaleString()}</div>
+            </div>
+            <div className={styles.metricCard}>
+              <div className={styles.metricLabel}>Revenue risk (USD/hr)</div>
+              <div className={styles.metricValue} style={{ color: "#fecaca" }}>${estRevenueRisk.toLocaleString()}</div>
+            </div>
+            <div className={styles.metricCard}>
+              <div className={styles.metricLabel}>SLA breach risk</div>
+              <div className={styles.metricValue} style={{ color: slaRisk > 50 ? "#fca5a5" : "#fde68a" }}>{slaRisk}%</div>
+            </div>
+            <div className={styles.metricCard}>
+              <div className={styles.metricLabel}>Active regions</div>
+              <div className={styles.metricValue} style={{ color: activeRegions > 0 ? "#93c5fd" : "#a7f3d0" }}>{activeRegions}</div>
+            </div>
           </div>
-          <div className={styles.metricCard}>
-            <div className={styles.metricLabel}>Revenue risk (USD/hr)</div>
-            <div className={styles.metricValue} style={{ color: "#fecaca" }}>${estRevenueRisk.toLocaleString()}</div>
-          </div>
-          <div className={styles.metricCard}>
-            <div className={styles.metricLabel}>SLA breach risk</div>
-            <div className={styles.metricValue} style={{ color: slaRisk > 50 ? "#fca5a5" : "#fde68a" }}>{slaRisk}%</div>
-          </div>
-          <div className={styles.metricCard}>
-            <div className={styles.metricLabel}>Active regions</div>
-            <div className={styles.metricValue} style={{ color: activeRegions > 0 ? "#93c5fd" : "#a7f3d0" }}>{activeRegions}</div>
-          </div>
-        </div>
+        </details>
 
         <details className={styles.foldPanel} open>
           <summary className={styles.foldSummary}>
