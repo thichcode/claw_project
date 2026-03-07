@@ -65,7 +65,7 @@ class IncidentCreate(BaseModel):
 
 
 class IncidentAssign(BaseModel):
-    assignee_id: int
+    assignee_id: int = Field(gt=0)
 
 
 class IncidentAck(BaseModel):
@@ -692,6 +692,10 @@ def ack_incident(incident_id: int, body: IncidentAck, user=Depends(auth_user)):
 
 @app.post("/incidents/{incident_id}/assign")
 def assign_incident(incident_id: int, body: IncidentAssign, user=Depends(auth_user)):
+    assignee = query_one("SELECT id FROM users WHERE id = %s", (body.assignee_id,))
+    if not assignee:
+        raise HTTPException(status_code=422, detail="Invalid assignee_id")
+
     row = execute(
         """
         UPDATE incidents SET assignee_id = %s, updated_at = NOW()
