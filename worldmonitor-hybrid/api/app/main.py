@@ -498,9 +498,15 @@ def list_alerts(status: Optional[str] = None, location_code: Optional[str] = Non
     filters = []
     params = []
 
-    if status:
-        filters.append("a.status = %s")
-        params.append(status)
+    if status is not None:
+        normalized_status = status.strip().lower()
+        if normalized_status:
+            try:
+                normalized_status = normalize_alert_status(normalized_status)
+            except ValueError as e:
+                raise HTTPException(status_code=422, detail=str(e))
+            filters.append("a.status = %s")
+            params.append(normalized_status)
 
     if location_code:
         filters.append("LOWER(COALESCE(l.code, '')) = %s")
