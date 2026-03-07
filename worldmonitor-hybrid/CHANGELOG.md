@@ -3,6 +3,7 @@
 ## 2026-03-07
 
 ### Changed
+- API topology: chuẩn hoá `criticality` khi tính KPI `critical_edges` (trim + lowercase) để đếm đúng cả dữ liệu edge viết hoa/thường không nhất quán (`High`/`CRITICAL`...), tránh KPI bị hụt do lệch casing từ nguồn dữ liệu.
 - API ingest: harden parser JSON cho các webhook ingest (`/ingest/zabbix`, `/ingest/alertmanager`, `/ingest/uptimerobot`) — payload `Content-Type: application/json` nhưng body lỗi cú pháp giờ trả `422 Malformed JSON body` thay vì rơi exception thành `500`, giúp client debug đúng lỗi input.
 - Home: thêm pill hiển thị data window ngay trong topbar trạng thái để thấy nhanh cửa sổ dữ liệu backend khi TV mode hoặc rollout live.
 - Home: thêm pill "Backend warming up" khi feed live chưa có location/alerts/incidents, giúp theo dõi rollout backend mà không cần redesign.

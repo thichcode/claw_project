@@ -933,7 +933,13 @@ def topology(env: Optional[str] = "prod", location_code: Optional[str] = None, _
     normalized_nodes.sort(key=lambda x: x.get("name", ""))
 
     affected_services = len([n for n in normalized_nodes if n["health"] != "healthy"])
-    critical_edges = len([e for e in normalized_edges if e["criticality"] in ("high", "critical")])
+    critical_edges = len(
+        [
+            e
+            for e in normalized_edges
+            if str(e.get("criticality") or "").strip().lower() in ("high", "critical")
+        ]
+    )
     return {
         "generated_at": now_iso(),
         "nodes": normalized_nodes,
