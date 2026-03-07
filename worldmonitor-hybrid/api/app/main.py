@@ -5,7 +5,7 @@ from typing import Optional
 
 import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .db import execute, query_all, query_one
 
@@ -13,6 +13,16 @@ from .db import execute, query_all, query_one
 JWT_SECRET = os.getenv("JWT_SECRET", "dev-secret")
 
 app = FastAPI(title="WorldMonitor API", version="0.1.0")
+
+ALLOWED_SEVERITIES = {"critical", "high", "medium", "warning", "low", "error", "disaster", "p1", "p2", "p3"}
+
+
+def normalize_severity(value: Optional[str], default: str = "warning") -> str:
+    normalized = str(value or default).strip().lower()
+    if normalized not in ALLOWED_SEVERITIES:
+        allowed = ", ".join(sorted(ALLOWED_SEVERITIES))
+        raise ValueError(f"Invalid severity '{value}'. Allowed values: {allowed}")
+    return normalized
 
 
 class LoginRequest(BaseModel):
@@ -29,6 +39,11 @@ class IncidentCreate(BaseModel):
     severity: str = "medium"
     service_id: Optional[int] = None
     location_code: Optional[str] = None
+
+    @field_validator("severity")
+    @classmethod
+    def validate_severity(cls, value: str):
+        return normalize_severity(value, default="medium")
 
 
 class IncidentAssign(BaseModel):
@@ -53,6 +68,11 @@ class IngestEvent(BaseModel):
     region: Optional[str] = None
     zone: Optional[str] = None
     payload: dict = Field(default_factory=dict)
+
+    @field_validator("severity")
+    @classmethod
+    def validate_severity(cls, value: Optional[str]):
+        return normalize_severity(value, default="warning")
 
 
 class TopologyNode(BaseModel):
