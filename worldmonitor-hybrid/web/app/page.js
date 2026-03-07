@@ -49,10 +49,10 @@ export default async function DashboardPage({ searchParams }) {
     open_alerts: toSafeCount(summaryRaw?.open_alerts ?? mockSummary.open_alerts),
     open_incidents: toSafeCount(summaryRaw?.open_incidents ?? mockSummary.open_incidents),
   };
-  const locations = await safeApiGet("/locations", []);
+  const locationsRaw = await safeApiGet("/locations", []);
   const normalizedLocations = Array.from(
     new Map(
-      (locations || [])
+      ensureArray(locationsRaw)
         .map((item) => {
           const code = normalizeLocationCode(item?.code);
           const key = normalizeLocationKey(code);

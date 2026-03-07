@@ -8,6 +8,7 @@
 - Home data flow: chuẩn hoá các trường đếm (`open_alerts/open_incidents`) về số không âm trước khi tính KPI/hotspot/active regions, tránh lệch số khi API trả giá trị âm hoặc sai kiểu.
 - Home: tăng phản hồi hover cho chip Location để dễ nhận biết mục tiêu đang chọn.
 - Home data flow: khi đang lọc theo location cụ thể, KPI/topbar dùng số alert/incident của chính location đang focus (từ danh sách đã lọc) thay vì summary global để tránh lệch ngữ cảnh vận hành.
+- Home data flow: harden dữ liệu `/locations` bằng `ensureArray` trước khi chuẩn hoá mã vùng, tránh lỗi `.map is not a function` khi API tạm trả sai kiểu.
 
 ## 2026-03-06
 
