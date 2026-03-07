@@ -37,6 +37,14 @@ function normalizeLocationKey(value) {
   return normalizeLocationCode(value).toLowerCase();
 }
 
+function isOpenStatus(value) {
+  return normalizeLocationKey(value) === "open";
+}
+
+function countOpenRecords(rows) {
+  return ensureArray(rows).filter((row) => isOpenStatus(row?.status)).length;
+}
+
 export default async function DashboardPage({ searchParams }) {
   const locationParam = String(searchParams?.location || "all").trim();
   const warMode = String(searchParams?.war || "0") === "1";
@@ -122,8 +130,10 @@ export default async function DashboardPage({ searchParams }) {
   const rightIncidents = incidents.slice(0, 8);
   const leftAlerts = alerts.slice(0, 12);
 
-  const focusedOpenIncidents = location === "all" ? summary.open_incidents : incidents.length;
-  const focusedOpenAlerts = location === "all" ? summary.open_alerts : alerts.length;
+  const focusedOpenIncidents =
+    location === "all" ? summary.open_incidents : countOpenRecords(incidents);
+  const focusedOpenAlerts =
+    location === "all" ? summary.open_alerts : countOpenRecords(alerts);
 
   const rangeFactor = range === "15m" ? 0.35 : range === "24h" ? 2.4 : 1;
   const estImpactedUsers = Math.round((focusedOpenAlerts * 230 + focusedOpenIncidents * 900) * rangeFactor);
