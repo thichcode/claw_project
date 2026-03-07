@@ -57,6 +57,7 @@ export default async function DashboardPage({ searchParams }) {
     open_alerts: toSafeCount(summaryRaw?.open_alerts ?? mockSummary.open_alerts),
     open_incidents: toSafeCount(summaryRaw?.open_incidents ?? mockSummary.open_incidents),
   };
+  const isSimulated = !summaryRaw || summaryRaw?.simulated === true;
   const locationsRaw = await safeApiGet("/locations", []);
   const normalizedLocations = Array.from(
     new Map(
@@ -181,11 +182,13 @@ export default async function DashboardPage({ searchParams }) {
 
       <details className={styles.noticePanel} open>
         <summary className={styles.noticeSummary}>
-          <span>Demo data notice</span>
-          <span className={styles.noticePill}>Simulated</span>
+          <span>{isSimulated ? "Demo data notice" : "Live feed status"}</span>
+          <span className={styles.noticePill}>{isSimulated ? "Simulated" : "Live"}</span>
         </summary>
         <div className={styles.noticeBody}>
-          ⚠ SIMULATED / ESTIMATED DATA (demo mode) — không dùng để ra quyết định production.
+          {isSimulated
+            ? "⚠ SIMULATED / ESTIMATED DATA (demo mode) — không dùng để ra quyết định production."
+            : "Live API connected — chỉ số đang lấy từ backend rollout."}
         </div>
       </details>
 

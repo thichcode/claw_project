@@ -3,6 +3,7 @@
 ## 2026-03-07
 
 ### Changed
+- Home: thêm trạng thái Live/Simulated ở panel notice để kiểm tra nhanh backend rollout đang cấp dữ liệu thật hay demo.
 - API incidents: harden endpoint `POST /incidents/{id}/ack` theo state-machine — incident `resolved` sẽ trả `409`, incident đã `acked` giữ idempotent (không ghi event trùng), chỉ cho chuyển `open -> acked`.
 - API alerts: harden endpoint `POST /alerts/{id}/ack` theo state-machine — chỉ cho `open -> acked`, alert đã `acked` trả idempotent (không ghi đè `acked_at`), trạng thái khác trả `409`.
 - Home: thêm hint nhẹ khi `/locations` rỗng để báo đang ở Global-only trong lúc backend chưa trả dữ liệu location.
