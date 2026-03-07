@@ -8,6 +8,7 @@
 - Home: topbar pill ưu tiên dùng `summary.data_window` từ backend (fallback `range`) để thể hiện cửa sổ dữ liệu thật trong rollout.
 - Home: thêm TV mode (`?tv=1`) để chuyển về bố cục treo màn hình (ẩn notice + control stack, giữ topbar gọn + map/widget full-height) và có nút toggle TV mode ngay trên topbar.
 - Home: thêm dòng "Feed coverage" trong notice panel để nhìn nhanh số locations/alerts/incidents từ backend.
+- Home: bổ sung hiển thị data window ngay trong notice feed coverage để kiểm tra cửa sổ dữ liệu backend nhanh hơn.
 - API incidents: harden `POST /incidents/{id}/comment` với validation chặt hơn (`comment` bắt buộc non-blank sau khi trim, giới hạn 2000 ký tự) để chặn event comment rỗng/space-only làm nhiễu timeline.
 - API validation: chuẩn hoá + chặn severity không hợp lệ cho `POST /incidents` và các endpoint ingest (`/ingest/zabbix`, `/ingest/alertmanager`, `/ingest/uptimerobot`) bằng allowlist rõ ràng; trả `422` sớm thay vì lưu dữ liệu bẩn gây lệch health/ranking downstream.
 - Home: thêm trạng thái Live/Simulated ở panel notice để kiểm tra nhanh backend rollout đang cấp dữ liệu thật hay demo.
