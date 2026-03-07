@@ -16,6 +16,7 @@
 - Home: thêm trạng thái Live/Simulated ở panel notice để kiểm tra nhanh backend rollout đang cấp dữ liệu thật hay demo.
 - Home: bổ sung pill dữ liệu ở topbar để thấy nhanh feed đang Live API hay Simulated.
 - Home: bổ sung pill thống kê nhanh (locations/alerts/incidents) trên topbar để kiểm tra coverage backend rollout.
+- Home: notice panel mặc định auto-collapse khi đang Live feed để giảm clutter, vẫn mở khi Simulated.
 - API incidents: harden endpoint `POST /incidents/{id}/ack` theo state-machine — incident `resolved` sẽ trả `409`, incident đã `acked` giữ idempotent (không ghi event trùng), chỉ cho chuyển `open -> acked`.
 - API alerts: harden endpoint `POST /alerts/{id}/ack` theo state-machine — chỉ cho `open -> acked`, alert đã `acked` trả idempotent (không ghi đè `acked_at`), trạng thái khác trả `409`.
 - API incidents: harden endpoint `POST /incidents/{id}/resolve` theo state-machine — chỉ cho `open/acked -> resolved`, incident đã `resolved` trả idempotent (không ghi event trùng), trạng thái bất thường trả `409`.
