@@ -3,6 +3,7 @@
 ## 2026-03-07
 
 ### Changed
+- Ingest integrations: nâng cấp `POST /ingest/zabbix` và `POST /ingest/uptimerobot` để nhận cả payload chuẩn `IngestEvent` lẫn webhook payload gốc (JSON/form-urlencoded), tự map severity/state/title/service/fingerprint/location; hỗ trợ sự kiện recovery (`up/ok`) vào trạng thái `acked` để không đội số open alerts.
 - Home: topbar pill ưu tiên dùng `summary.data_window` từ backend (fallback `range`) để thể hiện cửa sổ dữ liệu thật trong rollout.
 - Home: thêm TV mode (`?tv=1`) để chuyển về bố cục treo màn hình (ẩn notice + control stack, giữ topbar gọn + map/widget full-height) và có nút toggle TV mode ngay trên topbar.
 - Home: thêm dòng "Feed coverage" trong notice panel để nhìn nhanh số locations/alerts/incidents từ backend.

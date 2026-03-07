@@ -2,10 +2,11 @@ import os
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from urllib.parse import parse_qs, urlparse
 
 import jwt
-from fastapi import Depends, FastAPI, Header, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from .db import execute, query_all, query_one
 
@@ -14,7 +15,8 @@ JWT_SECRET = os.getenv("JWT_SECRET", "dev-secret")
 
 app = FastAPI(title="WorldMonitor API", version="0.1.0")
 
-ALLOWED_SEVERITIES = {"critical", "high", "medium", "warning", "low", "error", "disaster", "p1", "p2", "p3"}
+ALLOWED_SEVERITIES = {"critical", "high", "medium", "warning", "low", "error", "disaster", "p1", "p2", "p3", "info", "ok"}
+ALLOWED_ALERT_STATUSES = {"open", "acked"}
 
 
 def normalize_severity(value: Optional[str], default: str = "warning") -> str:
@@ -22,6 +24,14 @@ def normalize_severity(value: Optional[str], default: str = "warning") -> str:
     if normalized not in ALLOWED_SEVERITIES:
         allowed = ", ".join(sorted(ALLOWED_SEVERITIES))
         raise ValueError(f"Invalid severity '{value}'. Allowed values: {allowed}")
+    return normalized
+
+
+def normalize_alert_status(value: Optional[str], default: str = "open") -> str:
+    normalized = str(value or default).strip().lower()
+    if normalized not in ALLOWED_ALERT_STATUSES:
+        allowed = ", ".join(sorted(ALLOWED_ALERT_STATUSES))
+        raise ValueError(f"Invalid alert status '{value}'. Allowed values: {allowed}")
     return normalized
 
 
@@ -71,6 +81,7 @@ class IngestEvent(BaseModel):
     fingerprint: Optional[str] = None
     service_name: Optional[str] = None
     severity: Optional[str] = "warning"
+    status: Optional[str] = "open"
     title: Optional[str] = "Incoming alert"
     location_code: Optional[str] = None
     region: Optional[str] = None
@@ -81,6 +92,11 @@ class IngestEvent(BaseModel):
     @classmethod
     def validate_severity(cls, value: Optional[str]):
         return normalize_severity(value, default="warning")
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, value: Optional[str]):
+        return normalize_alert_status(value, default="open")
 
 
 class TopologyNode(BaseModel):
@@ -157,6 +173,166 @@ def login(body: LoginRequest):
     return {"access_token": token, "token_type": "bearer"}
 
 
+def pick_first(data: dict, *keys):
+    for key in keys:
+        if key in data and data.get(key) not in (None, ""):
+            return data.get(key)
+    return None
+
+
+def normalize_source_severity(value: Optional[str], source: str, default: str = "warning") -> str:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return normalize_severity(default, default=default)
+
+    # numeric severities (e.g. Zabbix priority 0..5)
+    if raw.isdigit():
+        num = int(raw)
+        if source == "zabbix":
+            if num >= 4:
+                return "critical"
+            if num == 3:
+                return "high"
+            if num == 2:
+                return "medium"
+            if num == 1:
+                return "warning"
+            return "info"
+
+    aliases = {
+        "disaster": "critical",
+        "average": "medium",
+        "warn": "warning",
+        "information": "info",
+        "not classified": "info",
+        "ok": "ok",
+        "resolved": "info",
+        "up": "info",
+        "down": "critical",
+    }
+    mapped = aliases.get(raw, raw)
+    return normalize_severity(mapped, default=default)
+
+
+def normalize_event_state(value: Optional[str], default: str = "open") -> str:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return normalize_alert_status(default, default=default)
+
+    if raw in {"0", "ok", "up", "resolved", "recovered", "false", "close", "closed"}:
+        return "acked"
+    if raw in {"1", "problem", "down", "alert", "open", "true", "firing"}:
+        return "open"
+    return normalize_alert_status(default, default=default)
+
+
+async def parse_ingest_payload(request: Request) -> dict:
+    content_type = (request.headers.get("content-type") or "").lower()
+
+    if "application/json" in content_type:
+        payload = await request.json()
+        if isinstance(payload, dict):
+            return payload
+        return {"payload": payload}
+
+    raw_body = (await request.body()).decode("utf-8", errors="ignore").strip()
+    if not raw_body:
+        return {}
+
+    if "application/x-www-form-urlencoded" in content_type:
+        parsed = parse_qs(raw_body, keep_blank_values=False)
+        return {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
+
+    # Last resort: try JSON even if content-type is wrong
+    try:
+        payload = json.loads(raw_body)
+        if isinstance(payload, dict):
+            return payload
+        return {"payload": payload}
+    except Exception:
+        return {"payload": {"raw": raw_body}}
+
+
+def event_from_zabbix_payload(payload: dict) -> IngestEvent:
+    state = normalize_event_state(
+        pick_first(payload, "event_status", "status", "value", "event_value", "trigger_value"),
+        default="open",
+    )
+    severity = normalize_source_severity(
+        pick_first(payload, "severity", "event_severity", "trigger_severity", "priority"),
+        source="zabbix",
+        default="warning",
+    )
+    title = (
+        pick_first(payload, "title", "subject", "alert_subject", "trigger_name", "name", "message")
+        or "Zabbix alert"
+    )
+    service_name = pick_first(payload, "service_name", "host", "host_name", "hostname") or "zabbix-host"
+    fingerprint = pick_first(payload, "fingerprint", "event_id", "eventid", "problem_id", "triggerid")
+
+    return IngestEvent(
+        source="zabbix",
+        fingerprint=str(fingerprint) if fingerprint is not None else None,
+        service_name=str(service_name),
+        severity=severity,
+        status=state,
+        title=str(title),
+        location_code=pick_first(payload, "location_code", "location", "site", "dc", "datacenter"),
+        region=pick_first(payload, "region"),
+        zone=pick_first(payload, "zone"),
+        payload=payload,
+    )
+
+
+def event_from_uptimerobot_payload(payload: dict) -> IngestEvent:
+    alert_type_raw = pick_first(payload, "alert_type", "alertType", "status")
+    state = normalize_event_state(alert_type_raw, default="open")
+
+    severity_hint = pick_first(payload, "severity")
+    if severity_hint is not None:
+        severity = normalize_source_severity(severity_hint, source="uptimerobot", default="warning")
+    else:
+        severity = "critical" if state == "open" else "info"
+
+    monitor_name = (
+        pick_first(payload, "service_name", "friendly_name", "monitor_friendly_name", "monitor_name")
+        or "uptimerobot-monitor"
+    )
+    monitor_url = pick_first(payload, "monitor_url", "url", "monitorURL")
+    if not pick_first(payload, "service_name") and monitor_url:
+        try:
+            monitor_name = urlparse(str(monitor_url)).hostname or monitor_name
+        except Exception:
+            pass
+
+    fingerprint = pick_first(payload, "fingerprint", "alert_id", "id")
+    if fingerprint is None:
+        monitor_id = pick_first(payload, "monitor_id", "monitorID")
+        if monitor_id is not None:
+            fingerprint = f"uptimerobot:{monitor_id}:{alert_type_raw or state}"
+
+    title = pick_first(payload, "title")
+    if not title:
+        title = (
+            f"UptimeRobot: {monitor_name} DOWN"
+            if state == "open"
+            else f"UptimeRobot: {monitor_name} RECOVERED"
+        )
+
+    return IngestEvent(
+        source="uptimerobot",
+        fingerprint=str(fingerprint) if fingerprint is not None else None,
+        service_name=str(monitor_name),
+        severity=severity,
+        status=state,
+        title=str(title),
+        location_code=pick_first(payload, "location_code", "location"),
+        region=pick_first(payload, "region"),
+        zone=pick_first(payload, "zone"),
+        payload=payload,
+    )
+
+
 def resolve_location(event: IngestEvent):
     loc_code = (event.location_code or event.zone or event.region or "global").strip().lower().replace(" ", "-")
     if not loc_code:
@@ -219,8 +395,8 @@ def save_ingest(source: str, event: IngestEvent):
 
     row = execute(
         """
-        INSERT INTO alert_events(source, fingerprint, service_id, location_id, severity, title, payload, status)
-        VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, 'open')
+        INSERT INTO alert_events(source, fingerprint, service_id, location_id, severity, title, payload, status, acked_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s, CASE WHEN %s = 'acked' THEN NOW() ELSE NULL END)
         RETURNING id, source, severity, title, status, created_at
         """,
         (
@@ -231,6 +407,8 @@ def save_ingest(source: str, event: IngestEvent):
             event.severity,
             event.title,
             json.dumps(event.payload),
+            event.status or "open",
+            event.status or "open",
         ),
     )
     return row
@@ -275,18 +453,44 @@ def compute_blast_radius(affected_services: int):
 
 
 @app.post("/ingest/zabbix")
-def ingest_zabbix(body: IngestEvent):
-    return {"ok": True, "event": save_ingest("zabbix", body)}
+async def ingest_zabbix(request: Request):
+    payload = await parse_ingest_payload(request)
+    try:
+        try:
+            event = IngestEvent.model_validate(payload)
+            event.source = "zabbix"
+        except ValidationError:
+            event = event_from_zabbix_payload(payload)
+        return {"ok": True, "event": save_ingest("zabbix", event)}
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 @app.post("/ingest/alertmanager")
-def ingest_alertmanager(body: IngestEvent):
-    return {"ok": True, "event": save_ingest("alertmanager", body)}
+async def ingest_alertmanager(request: Request):
+    payload = await parse_ingest_payload(request)
+    try:
+        event = IngestEvent.model_validate(payload)
+        event.source = "alertmanager"
+        return {"ok": True, "event": save_ingest("alertmanager", event)}
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=e.errors())
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 @app.post("/ingest/uptimerobot")
-def ingest_uptimerobot(body: IngestEvent):
-    return {"ok": True, "event": save_ingest("uptimerobot", body)}
+async def ingest_uptimerobot(request: Request):
+    payload = await parse_ingest_payload(request)
+    try:
+        try:
+            event = IngestEvent.model_validate(payload)
+            event.source = "uptimerobot"
+        except ValidationError:
+            event = event_from_uptimerobot_payload(payload)
+        return {"ok": True, "event": save_ingest("uptimerobot", event)}
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 @app.get("/alerts")

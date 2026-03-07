@@ -13,7 +13,7 @@ WorldMonitor currently supports:
 - `POST /ingest/uptimerobot`
 - `POST /ingest/alertmanager`
 
-Payload shape (`IngestEvent`):
+Payload shape (`IngestEvent`) - **recommended canonical format**:
 
 ```json
 {
@@ -27,6 +27,8 @@ Payload shape (`IngestEvent`):
   }
 }
 ```
+
+> Note: API now supports both canonical format above **and raw vendor webhook payloads** for Zabbix/UptimeRobot (auto-mapping severity/state/title/service/fingerprint).
 
 ---
 
