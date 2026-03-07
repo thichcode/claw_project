@@ -62,6 +62,7 @@
 - Home: thêm nhãn "Locations" trước filter chips để nhóm khu vực rõ ràng hơn.
 - Home data flow: thêm fallback tính `Active regions` từ topology global khi `/locations` rỗng hoặc thiếu mã vùng, tránh KPI về 0 sai lệch.
 - Home data flow: dedupe location code theo key không phân biệt hoa/thường khi chuẩn hoá `/locations` và dựng danh sách topology fetch, tránh gọi API trùng nếu nguồn trả lẫn `us`/`US`.
+- Home data flow: chuẩn hoá `topologyGlobal.nodes[].location_code` theo key lowercase khi tính `Active regions`, tránh đếm trùng khu vực nếu dữ liệu lẫn hoa/thường (`US`/`us`).
 
 ### Added (latest rounds)
 - Thêm KPI card `Active regions` trên Home để thấy nhanh số khu vực đang có alert/incident.

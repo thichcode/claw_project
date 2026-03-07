@@ -131,7 +131,7 @@ export default async function DashboardPage({ searchParams }) {
   const activeRegionsFromGlobalTopology = new Set(
     ensureArray(topologyGlobal?.nodes)
       .filter((n) => toSafeNumber(n?.open_alerts) > 0 || toSafeNumber(n?.open_incidents) > 0)
-      .map((n) => normalizeLocationCode(n?.location_code))
+      .map((n) => normalizeLocationKey(n?.location_code))
       .filter(Boolean)
   ).size;
 
