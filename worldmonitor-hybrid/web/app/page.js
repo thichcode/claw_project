@@ -162,6 +162,11 @@ export default async function DashboardPage({ searchParams }) {
           <StatusBadge status={`critical ${focusedOpenAlerts || 0}`} />
           <StatusBadge status={`open incidents ${focusedOpenIncidents || 0}`} />
         </div>
+        <div className={styles.topbarMeta}>
+          <span className={styles.metaPill}>
+            {location === "all" ? "Global" : location} · {range}{warMode ? " · War" : ""}
+          </span>
+        </div>
       </div>
 
       <details className={styles.noticePanel} open>

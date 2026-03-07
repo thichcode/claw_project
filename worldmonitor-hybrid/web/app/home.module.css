@@ -35,6 +35,22 @@
   background: rgba(8,12,22,.6);
 }
 
+.topbarMeta {
+  display: flex;
+  align-items: center;
+}
+
+.metaPill {
+  font-size: 11px;
+  color: #cbd5e1;
+  border-radius: 999px;
+  border: 1px solid rgba(56,189,248,.25);
+  background: rgba(10,16,30,.7);
+  padding: 3px 10px;
+  letter-spacing: .2px;
+  text-transform: uppercase;
+}
+
 .brand {
   display: flex;
   gap: 10px;

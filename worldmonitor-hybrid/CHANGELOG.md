@@ -3,6 +3,7 @@
 ## 2026-03-07
 
 ### Changed
+- Home: thêm pill ngữ cảnh hiển thị nhanh location/time range/war mode ở topbar để scan trạng thái nhanh hơn.
 - Home: chuyển Key KPI Snapshot thành panel có toggle ẩn/hiện để bố cục gọn hơn khi cần tập trung.
 - Home: thêm indicator mũi tên cho các panel toggle để biết trạng thái đang mở/đóng khi quét nhanh.
 - Home data flow: chuẩn hoá các trường đếm (`open_alerts/open_incidents`) về số không âm trước khi tính KPI/hotspot/active regions, tránh lệch số khi API trả giá trị âm hoặc sai kiểu.
