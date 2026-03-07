@@ -55,7 +55,15 @@ class IncidentAck(BaseModel):
 
 
 class IncidentComment(BaseModel):
-    comment: str
+    comment: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("comment")
+    @classmethod
+    def validate_comment(cls, value: str):
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("comment must not be blank")
+        return normalized
 
 
 class IngestEvent(BaseModel):
