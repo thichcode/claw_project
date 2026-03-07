@@ -4,6 +4,7 @@
 
 ### Changed
 - Home: chuyển Key KPI Snapshot thành panel có toggle ẩn/hiện để bố cục gọn hơn khi cần tập trung.
+- Home data flow: chuẩn hoá các trường đếm (`open_alerts/open_incidents`) về số không âm trước khi tính KPI/hotspot/active regions, tránh lệch số khi API trả giá trị âm hoặc sai kiểu.
 
 ## 2026-03-06
 

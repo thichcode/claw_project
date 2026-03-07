@@ -11,8 +11,8 @@ import styles from "./home.module.css";
 function hotspotScore(n) {
   const h = String(n.health || "").toLowerCase();
   const sev = h === "critical" ? 5 : h === "warning" ? 3 : 1;
-  const openIncidents = toSafeNumber(n?.open_incidents);
-  const openAlerts = toSafeNumber(n?.open_alerts);
+  const openIncidents = toSafeCount(n?.open_incidents);
+  const openAlerts = toSafeCount(n?.open_alerts);
   return sev * 100 + openIncidents * 30 + openAlerts * 8;
 }
 
@@ -23,6 +23,10 @@ function ensureArray(value) {
 function toSafeNumber(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
+}
+
+function toSafeCount(value) {
+  return Math.max(0, toSafeNumber(value));
 }
 
 function normalizeLocationCode(value) {
@@ -42,8 +46,8 @@ export default async function DashboardPage({ searchParams }) {
   const summary = {
     ...mockSummary,
     ...(summaryRaw || {}),
-    open_alerts: toSafeNumber(summaryRaw?.open_alerts ?? mockSummary.open_alerts),
-    open_incidents: toSafeNumber(summaryRaw?.open_incidents ?? mockSummary.open_incidents),
+    open_alerts: toSafeCount(summaryRaw?.open_alerts ?? mockSummary.open_alerts),
+    open_incidents: toSafeCount(summaryRaw?.open_incidents ?? mockSummary.open_incidents),
   };
   const locations = await safeApiGet("/locations", []);
   const normalizedLocations = Array.from(
@@ -124,13 +128,13 @@ export default async function DashboardPage({ searchParams }) {
   const slaRisk = Math.min(99, Math.round((summary.open_incidents * 8 + summary.open_alerts * 2.3) * (warMode ? 1.2 : 1)));
   const activeRegionsFromLocationTopology = topologyByLocation.filter((item) =>
     ensureArray(item.data?.nodes).some(
-      (n) => toSafeNumber(n?.open_alerts) > 0 || toSafeNumber(n?.open_incidents) > 0
+      (n) => toSafeCount(n?.open_alerts) > 0 || toSafeCount(n?.open_incidents) > 0
     )
   ).length;
 
   const activeRegionsFromGlobalTopology = new Set(
     ensureArray(topologyGlobal?.nodes)
-      .filter((n) => toSafeNumber(n?.open_alerts) > 0 || toSafeNumber(n?.open_incidents) > 0)
+      .filter((n) => toSafeCount(n?.open_alerts) > 0 || toSafeCount(n?.open_incidents) > 0)
       .map((n) => normalizeLocationKey(n?.location_code))
       .filter(Boolean)
   ).size;
