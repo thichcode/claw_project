@@ -3,6 +3,10 @@
   gap: 12px;
 }
 
+.shellTv {
+  gap: 8px;
+}
+
 .controlStack {
   display: grid;
   gap: 12px;
@@ -64,6 +68,24 @@
   text-transform: uppercase;
 }
 
+.metaToggle {
+  font-size: 10px;
+  color: #cbd5e1;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, .35);
+  background: rgba(15, 23, 42, .75);
+  padding: 3px 9px;
+  letter-spacing: .2px;
+  text-transform: uppercase;
+  text-decoration: none;
+}
+
+.metaToggleActive {
+  border-color: rgba(56,189,248,.65);
+  color: #e0f2fe;
+  box-shadow: 0 0 0 1px rgba(56,189,248,.28);
+}
+
 .brand {
   display: flex;
   gap: 10px;
@@ -90,6 +112,10 @@
 
 .content {
   display: block;
+}
+
+.contentTv {
+  margin-top: 0;
 }
 
 .sectionLabel {
@@ -208,6 +234,10 @@
 .fullMapStage {
   position: relative;
   min-height: 78vh;
+}
+
+.fullMapStageTv {
+  min-height: calc(100vh - 96px);
 }
 
 .panel {

@@ -48,6 +48,7 @@ function countOpenRecords(rows) {
 export default async function DashboardPage({ searchParams }) {
   const locationParam = String(searchParams?.location || "all").trim();
   const warMode = String(searchParams?.war || "0") === "1";
+  const tvMode = String(searchParams?.tv || "0") === "1";
   const rangeParam = String(searchParams?.range || "1h").trim();
   const range = ["15m", "1h", "24h"].includes(rangeParam) ? rangeParam : "1h";
   const summaryRaw = await safeApiGet("/summary", mockSummary);
@@ -159,7 +160,7 @@ export default async function DashboardPage({ searchParams }) {
       : activeRegionsFromGlobalTopology;
 
   return (
-    <main className={styles.shell}>
+    <main className={`${styles.shell} ${tvMode ? styles.shellTv : ""}`}>
       <div className={styles.topbar}>
         <div className={styles.brand}>
           <span className={styles.brandDot} />
@@ -175,14 +176,22 @@ export default async function DashboardPage({ searchParams }) {
         </div>
         <div className={styles.topbarMeta}>
           <span className={styles.metaPill}>
-            {location === "all" ? "Global" : location} · {range}{warMode ? " · War" : ""}
+            {location === "all" ? "Global" : location} · {range}{warMode ? " · War" : ""}{tvMode ? " · TV" : ""}
           </span>
           <span className={styles.metaPillSecondary}>
             {isSimulated ? "Simulated feed" : "Live API feed"}
           </span>
+          <a
+            className={`${styles.metaToggle} ${tvMode ? styles.metaToggleActive : ""}`}
+            href={`/?location=${encodeURIComponent(location)}&range=${encodeURIComponent(range)}&war=${warMode ? "1" : "0"}&tv=${tvMode ? "0" : "1"}`}
+          >
+            {tvMode ? "Exit TV mode" : "TV mode"}
+          </a>
         </div>
       </div>
 
+      {!tvMode && (
+      <>
       <details className={styles.noticePanel} open>
         <summary className={styles.noticeSummary}>
           <span>{isSimulated ? "Demo data notice" : "Live feed status"}</span>
@@ -202,7 +211,7 @@ export default async function DashboardPage({ searchParams }) {
         <div className={styles.sectionLabel}>Locations</div>
         <div className={styles.locationLinks}>
           <a
-            href={`/?range=${encodeURIComponent(range)}&war=${warMode ? "1" : "0"}`}
+            href={`/?range=${encodeURIComponent(range)}&war=${warMode ? "1" : "0"}&tv=${tvMode ? "1" : "0"}`}
             className={`${styles.locationLink} ${location === "all" ? styles.locationLinkActive : styles.locationLinkInactive}`}
           >
             Global
@@ -210,7 +219,7 @@ export default async function DashboardPage({ searchParams }) {
           {normalizedLocations.map((l) => (
             <a
               key={l.code}
-              href={`/?location=${encodeURIComponent(l.code)}&range=${encodeURIComponent(range)}&war=${warMode ? "1" : "0"}`}
+              href={`/?location=${encodeURIComponent(l.code)}&range=${encodeURIComponent(range)}&war=${warMode ? "1" : "0"}&tv=${tvMode ? "1" : "0"}`}
               className={`${styles.locationLink} ${location === l.code ? styles.locationLinkActive : styles.locationLinkInactive}`}
             >
               {l.code}
@@ -225,7 +234,7 @@ export default async function DashboardPage({ searchParams }) {
           <strong className={styles.quickLabel}>Quick Mode</strong>
           <a
             className={`${styles.quickLink} ${warMode ? styles.quickLinkActive : ""}`}
-            href={`/?location=${encodeURIComponent(location)}&range=${encodeURIComponent(range)}&war=${warMode ? "0" : "1"}`}
+            href={`/?location=${encodeURIComponent(location)}&range=${encodeURIComponent(range)}&war=${warMode ? "0" : "1"}&tv=${tvMode ? "1" : "0"}`}
           >
             {warMode ? "Disable War Mode" : "Enable War Mode"}
           </a>
@@ -239,7 +248,7 @@ export default async function DashboardPage({ searchParams }) {
             <a
               key={r.k}
               className={`${styles.quickLink} ${range === r.k ? styles.quickLinkActive : ""}`}
-              href={`/?location=${encodeURIComponent(location)}&range=${r.k}&war=${warMode ? "1" : "0"}`}
+              href={`/?location=${encodeURIComponent(location)}&range=${r.k}&war=${warMode ? "1" : "0"}&tv=${tvMode ? "1" : "0"}`}
             >
               {r.t}
             </a>
@@ -295,9 +304,11 @@ export default async function DashboardPage({ searchParams }) {
         <WidgetControlsBar />
         <SimulateControls />
       </div>
+      </>
+      )}
 
-      <div className={styles.content}>
-        <div className={styles.fullMapStage}>
+      <div className={`${styles.content} ${tvMode ? styles.contentTv : ""}`}>
+        <div className={`${styles.fullMapStage} ${tvMode ? styles.fullMapStageTv : ""}`}>
           <WorldMap topologyByLocation={topologyByLocation} topologyGlobal={topologyGlobal} warMode={warMode} timeRange={range} />
           <FloatingWidgets
             leftAlerts={leftAlerts}
