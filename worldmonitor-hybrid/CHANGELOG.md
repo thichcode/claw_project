@@ -3,6 +3,7 @@
 ## 2026-03-07
 
 ### Changed
+- Home: topbar pill ưu tiên dùng `summary.data_window` từ backend (fallback `range`) để thể hiện cửa sổ dữ liệu thật trong rollout.
 - Home: thêm TV mode (`?tv=1`) để chuyển về bố cục treo màn hình (ẩn notice + control stack, giữ topbar gọn + map/widget full-height) và có nút toggle TV mode ngay trên topbar.
 - Home: thêm dòng "Feed coverage" trong notice panel để nhìn nhanh số locations/alerts/incidents từ backend.
 - API incidents: harden `POST /incidents/{id}/comment` với validation chặt hơn (`comment` bắt buộc non-blank sau khi trim, giới hạn 2000 ký tự) để chặn event comment rỗng/space-only làm nhiễu timeline.
