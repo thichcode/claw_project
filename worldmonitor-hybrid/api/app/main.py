@@ -378,16 +378,28 @@ def get_incident(incident_id: int, _: dict = Depends(auth_user)):
 
 @app.post("/incidents/{incident_id}/ack")
 def ack_incident(incident_id: int, body: IncidentAck, user=Depends(auth_user)):
+    incident = query_one("SELECT id, status, updated_at FROM incidents WHERE id = %s", (incident_id,))
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    current_status = str(incident.get("status") or "").lower()
+    if current_status == "resolved":
+        raise HTTPException(status_code=409, detail="Resolved incident cannot be acknowledged")
+
+    if current_status == "acked":
+        return incident
+
     row = execute(
         """
         UPDATE incidents SET status = 'acked', updated_at = NOW()
-        WHERE id = %s
+        WHERE id = %s AND status = 'open'
         RETURNING id, status, updated_at
         """,
         (incident_id,),
     )
     if not row:
-        raise HTTPException(status_code=404, detail="Incident not found")
+        raise HTTPException(status_code=409, detail="Incident is not in open state")
+
     execute(
         """
         INSERT INTO incident_events(incident_id, event_type, actor_id, payload)

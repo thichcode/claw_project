@@ -3,6 +3,7 @@
 ## 2026-03-07
 
 ### Changed
+- API incidents: harden endpoint `POST /incidents/{id}/ack` theo state-machine — incident `resolved` sẽ trả `409`, incident đã `acked` giữ idempotent (không ghi event trùng), chỉ cho chuyển `open -> acked`.
 - Home: tinh chỉnh Quick Mode bar (padding/gradient + row gap) để nhóm control rõ ràng và dễ scan hơn.
 - Home: thêm pill ngữ cảnh hiển thị nhanh location/time range/war mode ở topbar để scan trạng thái nhanh hơn.
 - Home: chuyển Key KPI Snapshot thành panel có toggle ẩn/hiện để bố cục gọn hơn khi cần tập trung.
