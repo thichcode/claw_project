@@ -160,6 +160,9 @@ export default async function DashboardPage({ searchParams }) {
       ? activeRegionsFromLocationTopology
       : activeRegionsFromGlobalTopology;
 
+  const isBackendWarming =
+    !isSimulated && normalizedLocations.length === 0 && alerts.length === 0 && incidents.length === 0;
+
   return (
     <main className={`${styles.shell} ${tvMode ? styles.shellTv : ""}`}>
       <div className={styles.topbar}>
@@ -183,6 +186,9 @@ export default async function DashboardPage({ searchParams }) {
           <span className={styles.metaPillSecondary}>
             {isSimulated ? "Simulated feed" : "Live API feed"}
           </span>
+          {isBackendWarming && (
+            <span className={styles.metaPillWarn}>Backend warming up</span>
+          )}
           <span className={styles.metaPillInfo}>
             {normalizedLocations.length} loc · {alerts.length} alerts · {incidents.length} incidents
           </span>
