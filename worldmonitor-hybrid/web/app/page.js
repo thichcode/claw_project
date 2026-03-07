@@ -177,6 +177,9 @@ export default async function DashboardPage({ searchParams }) {
           <span className={styles.metaPill}>
             {location === "all" ? "Global" : location} · {range}{warMode ? " · War" : ""}
           </span>
+          <span className={styles.metaPillSecondary}>
+            {isSimulated ? "Simulated feed" : "Live API feed"}
+          </span>
         </div>
       </div>
 

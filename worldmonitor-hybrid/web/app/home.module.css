@@ -38,6 +38,8 @@
 .topbarMeta {
   display: flex;
   align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .metaPill {
@@ -47,6 +49,17 @@
   border: 1px solid rgba(56,189,248,.25);
   background: rgba(10,16,30,.7);
   padding: 3px 10px;
+  letter-spacing: .2px;
+  text-transform: uppercase;
+}
+
+.metaPillSecondary {
+  font-size: 10px;
+  color: #bae6fd;
+  border-radius: 999px;
+  border: 1px solid rgba(56,189,248,.35);
+  background: rgba(14,24,40,.7);
+  padding: 3px 9px;
   letter-spacing: .2px;
   text-transform: uppercase;
 }
