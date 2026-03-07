@@ -196,7 +196,10 @@ export default async function DashboardPage({ searchParams }) {
 
       {!tvMode && (
       <>
-      <details className={styles.noticePanel} open={isSimulated}>
+      <details
+        className={`${styles.noticePanel} ${!isSimulated ? styles.noticePanelLive : ""}`}
+        open={isSimulated}
+      >
         <summary className={styles.noticeSummary}>
           <span>{isSimulated ? "Demo data notice" : "Live feed status"}</span>
           <span className={styles.noticePill}>{isSimulated ? "Simulated" : "Live"}</span>

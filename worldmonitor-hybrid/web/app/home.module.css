@@ -280,6 +280,27 @@
   padding: 6px 10px 10px;
 }
 
+.noticePanelLive {
+  border: 1px solid rgba(56,189,248,.35);
+  background: rgba(14,24,40,.55);
+}
+
+.noticePanelLive .noticeSummary,
+.noticePanelLive .noticeSummary::after {
+  color: #bae6fd;
+}
+
+.noticePanelLive .noticePill {
+  border-color: rgba(56,189,248,.45);
+  color: #bae6fd;
+  background: rgba(56,189,248,.12);
+}
+
+.noticePanelLive .noticeBody,
+.noticePanelLive .noticeSub {
+  color: #cbd5e1;
+}
+
 .noticeSummary {
   list-style: none;
   display: flex;
