@@ -182,6 +182,9 @@ export default async function DashboardPage({ searchParams }) {
           <span className={styles.metaPillSecondary}>
             {isSimulated ? "Simulated feed" : "Live API feed"}
           </span>
+          <span className={styles.metaPillInfo}>
+            {normalizedLocations.length} loc · {alerts.length} alerts · {incidents.length} incidents
+          </span>
           <a
             className={`${styles.metaToggle} ${tvMode ? styles.metaToggleActive : ""}`}
             href={`/?location=${encodeURIComponent(location)}&range=${encodeURIComponent(range)}&war=${warMode ? "1" : "0"}&tv=${tvMode ? "0" : "1"}`}
