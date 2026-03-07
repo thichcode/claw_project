@@ -371,7 +371,9 @@ def resolve_service(source: str, event: IngestEvent):
     svc_name = (event.service_name or "unknown-service").strip() or "unknown-service"
     source_key = f"{source}:{svc_name.lower()}"
 
-    existing = query_one("SELECT id FROM services WHERE name = %s LIMIT 1", (svc_name,))
+    # Avoid duplicate services when upstream sources send inconsistent casing
+    # (e.g. "API-Gateway" vs "api-gateway").
+    existing = query_one("SELECT id FROM services WHERE LOWER(name) = LOWER(%s) LIMIT 1", (svc_name,))
     if existing:
         execute("UPDATE services SET source_key = COALESCE(source_key, %s) WHERE id = %s", (source_key, existing["id"]))
         return existing["id"]
