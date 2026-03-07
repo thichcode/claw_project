@@ -488,16 +488,27 @@ def comment_incident(incident_id: int, body: IncidentComment, user=Depends(auth_
 
 @app.post("/incidents/{incident_id}/resolve")
 def resolve_incident(incident_id: int, user=Depends(auth_user)):
+    incident = query_one("SELECT id, status, resolved_at FROM incidents WHERE id = %s", (incident_id,))
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    current_status = str(incident.get("status") or "").lower()
+    if current_status == "resolved":
+        return incident
+    if current_status not in {"open", "acked"}:
+        raise HTTPException(status_code=409, detail="Incident cannot be resolved from current state")
+
     row = execute(
         """
         UPDATE incidents SET status = 'resolved', resolved_at = NOW(), updated_at = NOW()
-        WHERE id = %s
+        WHERE id = %s AND status IN ('open', 'acked')
         RETURNING id, status, resolved_at
         """,
         (incident_id,),
     )
     if not row:
-        raise HTTPException(status_code=404, detail="Incident not found")
+        raise HTTPException(status_code=409, detail="Incident cannot be resolved from current state")
+
     execute(
         """
         INSERT INTO incident_events(incident_id, event_type, actor_id, payload)

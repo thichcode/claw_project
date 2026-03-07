@@ -10,6 +10,7 @@
 - Home: bổ sung pill dữ liệu ở topbar để thấy nhanh feed đang Live API hay Simulated.
 - API incidents: harden endpoint `POST /incidents/{id}/ack` theo state-machine — incident `resolved` sẽ trả `409`, incident đã `acked` giữ idempotent (không ghi event trùng), chỉ cho chuyển `open -> acked`.
 - API alerts: harden endpoint `POST /alerts/{id}/ack` theo state-machine — chỉ cho `open -> acked`, alert đã `acked` trả idempotent (không ghi đè `acked_at`), trạng thái khác trả `409`.
+- API incidents: harden endpoint `POST /incidents/{id}/resolve` theo state-machine — chỉ cho `open/acked -> resolved`, incident đã `resolved` trả idempotent (không ghi event trùng), trạng thái bất thường trả `409`.
 - Home: thêm hint nhẹ khi `/locations` rỗng để báo đang ở Global-only trong lúc backend chưa trả dữ liệu location.
 - Home: tinh chỉnh Quick Mode bar (padding/gradient + row gap) để nhóm control rõ ràng và dễ scan hơn.
 - Home: thêm pill ngữ cảnh hiển thị nhanh location/time range/war mode ở topbar để scan trạng thái nhanh hơn.
