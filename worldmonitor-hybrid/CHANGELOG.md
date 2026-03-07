@@ -3,6 +3,7 @@
 ## 2026-03-07
 
 ### Changed
+- API query filters: chuẩn hoá `location_code`/`env` cho `GET /alerts`, `GET /incidents`, `GET /topology` (trim + lowercase + bỏ filter nếu rỗng) để tránh lọc nhầm khi client gửi query toàn khoảng trắng và giữ topology fallback về `prod` khi `env` trống.
 - API incidents: harden validation cho `POST /incidents` — `title` giờ được trim + bắt buộc non-blank + giới hạn 300 ký tự để chặn incident rỗng/space-only hoặc quá dài gây bẩn dữ liệu timeline và list views.
 - API alerts: harden `GET /alerts` với validation `status` query param theo allowlist (`open|acked`), trim/lowercase trước khi query và trả `422` rõ nghĩa cho giá trị sai để tránh filter im lặng ra dữ liệu rỗng khó debug.
 - Ingest integrations: nâng cấp `POST /ingest/zabbix` và `POST /ingest/uptimerobot` để nhận cả payload chuẩn `IngestEvent` lẫn webhook payload gốc (JSON/form-urlencoded), tự map severity/state/title/service/fingerprint/location; hỗ trợ sự kiện recovery (`up/ok`) vào trạng thái `acked` để không đội số open alerts.

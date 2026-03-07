@@ -460,6 +460,18 @@ def compute_blast_radius(affected_services: int):
     return "Low"
 
 
+def normalize_optional_code(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    return normalized or None
+
+
+def normalize_env(value: Optional[str], default: str = "prod") -> str:
+    normalized = str(value or "").strip().lower()
+    return normalized or default
+
+
 @app.post("/ingest/zabbix")
 async def ingest_zabbix(request: Request):
     payload = await parse_ingest_payload(request)
@@ -516,9 +528,10 @@ def list_alerts(status: Optional[str] = None, location_code: Optional[str] = Non
             filters.append("a.status = %s")
             params.append(normalized_status)
 
-    if location_code:
+    normalized_location_code = normalize_optional_code(location_code)
+    if normalized_location_code:
         filters.append("LOWER(COALESCE(l.code, '')) = %s")
-        params.append(location_code.strip().lower())
+        params.append(normalized_location_code)
 
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
 
@@ -600,9 +613,10 @@ def list_incidents(location_code: Optional[str] = None, _: dict = Depends(auth_u
     filters = []
     params = []
 
-    if location_code:
+    normalized_location_code = normalize_optional_code(location_code)
+    if normalized_location_code:
         filters.append("LOWER(COALESCE(l.code, '')) = %s")
-        params.append(location_code.strip().lower())
+        params.append(normalized_location_code)
 
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
 
@@ -739,8 +753,11 @@ def resolve_incident(incident_id: int, user=Depends(auth_user)):
 
 @app.get("/topology")
 def topology(env: Optional[str] = "prod", location_code: Optional[str] = None, _: dict = Depends(auth_user)):
+    env_value = normalize_env(env, default="prod")
+    normalized_location_code = normalize_optional_code(location_code)
+
     try:
-        if location_code:
+        if normalized_location_code:
             nodes = query_all(
                 """
                 SELECT
@@ -777,7 +794,7 @@ def topology(env: Optional[str] = "prod", location_code: Optional[str] = None, _
                 WHERE s.environment = %s AND LOWER(COALESCE(l.code, '')) = %s
                 ORDER BY s.name ASC
                 """,
-                (env, location_code.strip().lower()),
+                (env_value, normalized_location_code),
             )
         else:
             nodes = query_all(
@@ -813,7 +830,7 @@ def topology(env: Optional[str] = "prod", location_code: Optional[str] = None, _
                 WHERE s.environment = %s
                 ORDER BY s.name ASC
                 """,
-                (env,),
+                (env_value,),
             )
     except Exception:
         nodes = []
