@@ -45,10 +45,18 @@ class AckRequest(BaseModel):
 
 
 class IncidentCreate(BaseModel):
-    title: str
+    title: str = Field(min_length=1, max_length=300)
     severity: str = "medium"
     service_id: Optional[int] = None
     location_code: Optional[str] = None
+
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, value: str):
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("title must not be blank")
+        return normalized
 
     @field_validator("severity")
     @classmethod

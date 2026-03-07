@@ -3,6 +3,7 @@
 ## 2026-03-07
 
 ### Changed
+- API incidents: harden validation cho `POST /incidents` — `title` giờ được trim + bắt buộc non-blank + giới hạn 300 ký tự để chặn incident rỗng/space-only hoặc quá dài gây bẩn dữ liệu timeline và list views.
 - API alerts: harden `GET /alerts` với validation `status` query param theo allowlist (`open|acked`), trim/lowercase trước khi query và trả `422` rõ nghĩa cho giá trị sai để tránh filter im lặng ra dữ liệu rỗng khó debug.
 - Ingest integrations: nâng cấp `POST /ingest/zabbix` và `POST /ingest/uptimerobot` để nhận cả payload chuẩn `IngestEvent` lẫn webhook payload gốc (JSON/form-urlencoded), tự map severity/state/title/service/fingerprint/location; hỗ trợ sự kiện recovery (`up/ok`) vào trạng thái `acked` để không đội số open alerts.
 - Home: topbar pill ưu tiên dùng `summary.data_window` từ backend (fallback `range`) để thể hiện cửa sổ dữ liệu thật trong rollout.
