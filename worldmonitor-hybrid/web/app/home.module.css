@@ -87,6 +87,12 @@
   transition: border-color .2s ease, color .2s ease, box-shadow .2s ease, opacity .2s ease;
 }
 
+.locationLink:hover {
+  border-color: rgba(56,189,248,.45);
+  color: #e2f1ff;
+  box-shadow: 0 0 0 1px rgba(56,189,248,.2);
+}
+
 .locationLinkActive {
   border-color: #38bdf8;
   color: #e2f1ff;
