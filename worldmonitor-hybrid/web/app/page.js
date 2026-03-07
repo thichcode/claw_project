@@ -172,6 +172,7 @@ export default async function DashboardPage({ searchParams }) {
         </div>
         <div className={styles.topbarStats}>
           <AutoRefresh seconds={8} />
+          <span className={styles.windowPill}>Window {dataWindow}</span>
           <StatusBadge status={`critical ${focusedOpenAlerts || 0}`} />
           <StatusBadge status={`open incidents ${focusedOpenIncidents || 0}`} />
         </div>
