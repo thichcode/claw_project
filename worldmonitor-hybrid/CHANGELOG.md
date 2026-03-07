@@ -3,6 +3,7 @@
 ## 2026-03-07
 
 ### Changed
+- Home: thêm dòng "Feed coverage" trong notice panel để nhìn nhanh số locations/alerts/incidents từ backend.
 - API incidents: harden `POST /incidents/{id}/comment` với validation chặt hơn (`comment` bắt buộc non-blank sau khi trim, giới hạn 2000 ký tự) để chặn event comment rỗng/space-only làm nhiễu timeline.
 - API validation: chuẩn hoá + chặn severity không hợp lệ cho `POST /incidents` và các endpoint ingest (`/ingest/zabbix`, `/ingest/alertmanager`, `/ingest/uptimerobot`) bằng allowlist rõ ràng; trả `422` sớm thay vì lưu dữ liệu bẩn gây lệch health/ranking downstream.
 - Home: thêm trạng thái Live/Simulated ở panel notice để kiểm tra nhanh backend rollout đang cấp dữ liệu thật hay demo.

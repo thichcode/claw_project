@@ -192,6 +192,9 @@ export default async function DashboardPage({ searchParams }) {
           {isSimulated
             ? "⚠ SIMULATED / ESTIMATED DATA (demo mode) — không dùng để ra quyết định production."
             : "Live API connected — chỉ số đang lấy từ backend rollout."}
+          <div className={styles.noticeSub}>
+            Feed coverage: {normalizedLocations.length} locations · {alerts.length} alerts · {incidents.length} incidents
+          </div>
         </div>
       </details>
 

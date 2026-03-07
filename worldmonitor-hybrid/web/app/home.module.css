@@ -276,6 +276,12 @@
   color: #fecaca;
 }
 
+.noticeSub {
+  margin-top: 6px;
+  font-size: 11px;
+  color: rgba(254, 202, 202, 0.8);
+}
+
 .foldSummary {
   list-style: none;
   display: flex;
