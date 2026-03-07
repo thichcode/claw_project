@@ -577,6 +577,11 @@ def ack_alert(alert_id: int, body: AckRequest, user=Depends(auth_user)):
 
 @app.post("/incidents")
 def create_incident(body: IncidentCreate, user=Depends(auth_user)):
+    if body.service_id is not None:
+        service = query_one("SELECT id FROM services WHERE id = %s", (body.service_id,))
+        if not service:
+            raise HTTPException(status_code=422, detail="Invalid service_id")
+
     location_id = None
     if body.location_code:
         lc = body.location_code.strip().lower().replace(" ", "-")
