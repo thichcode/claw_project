@@ -3,6 +3,7 @@
 ## 2026-03-07
 
 ### Changed
+- Home: tinh chỉnh Quick Mode bar (padding/gradient + row gap) để nhóm control rõ ràng và dễ scan hơn.
 - Home: thêm pill ngữ cảnh hiển thị nhanh location/time range/war mode ở topbar để scan trạng thái nhanh hơn.
 - Home: chuyển Key KPI Snapshot thành panel có toggle ẩn/hiện để bố cục gọn hơn khi cần tập trung.
 - Home: thêm indicator mũi tên cho các panel toggle để biết trạng thái đang mở/đóng khi quét nhanh.
