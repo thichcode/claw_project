@@ -61,6 +61,17 @@
   text-transform: uppercase;
 }
 
+.topbarHint {
+  font-size: 10px;
+  color: #fde68a;
+  border-radius: 999px;
+  border: 1px solid rgba(251, 191, 36, .4);
+  background: rgba(30, 20, 8, .65);
+  padding: 2px 8px;
+  letter-spacing: .2px;
+  text-transform: uppercase;
+}
+
 .topbarMeta {
   display: flex;
   align-items: center;

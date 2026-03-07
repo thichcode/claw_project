@@ -177,6 +177,7 @@ export default async function DashboardPage({ searchParams }) {
           <AutoRefresh seconds={8} />
           <span className={styles.windowPill}>Window {dataWindow}</span>
           <span className={styles.topbarCount}>{normalizedLocations.length} locations</span>
+          {isBackendWarming && <span className={styles.topbarHint}>Warming data</span>}
           <StatusBadge status={`critical ${focusedOpenAlerts || 0}`} />
           <StatusBadge status={`open incidents ${focusedOpenIncidents || 0}`} />
         </div>

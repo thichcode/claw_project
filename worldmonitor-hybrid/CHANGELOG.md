@@ -5,6 +5,7 @@
 ### Changed
 - API incidents: harden `POST /incidents/{id}/assign` để validate `assignee_id` hợp lệ (bắt buộc > 0 theo schema + phải tồn tại trong bảng `users`), trả `422 Invalid assignee_id` rõ nghĩa thay vì chấp nhận ID mồ côi gây lệch dữ liệu phân công.
 - Home: thêm pill "locations" nhỏ ngay topbar stats để thấy nhanh coverage từ backend rollout mà không làm đổi bố cục.
+- Home: thêm pill "Warming data" trong topbar stats khi feed live chưa có dữ liệu, giúp nhận biết backend rollout đang khởi động mà không đổi layout.
 - API topology: chuẩn hoá `criticality` khi tính KPI `critical_edges` (trim + lowercase) để đếm đúng cả dữ liệu edge viết hoa/thường không nhất quán (`High`/`CRITICAL`...), tránh KPI bị hụt do lệch casing từ nguồn dữ liệu.
 - API ingest: harden parser JSON cho các webhook ingest (`/ingest/zabbix`, `/ingest/alertmanager`, `/ingest/uptimerobot`) — payload `Content-Type: application/json` nhưng body lỗi cú pháp giờ trả `422 Malformed JSON body` thay vì rơi exception thành `500`, giúp client debug đúng lỗi input.
 - Home: thêm pill hiển thị data window ngay trong topbar trạng thái để thấy nhanh cửa sổ dữ liệu backend khi TV mode hoặc rollout live.
