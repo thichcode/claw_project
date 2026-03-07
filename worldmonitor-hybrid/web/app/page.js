@@ -122,10 +122,13 @@ export default async function DashboardPage({ searchParams }) {
   const rightIncidents = incidents.slice(0, 8);
   const leftAlerts = alerts.slice(0, 12);
 
+  const focusedOpenIncidents = location === "all" ? summary.open_incidents : incidents.length;
+  const focusedOpenAlerts = location === "all" ? summary.open_alerts : alerts.length;
+
   const rangeFactor = range === "15m" ? 0.35 : range === "24h" ? 2.4 : 1;
-  const estImpactedUsers = Math.round((summary.open_alerts * 230 + summary.open_incidents * 900) * rangeFactor);
-  const estRevenueRisk = Math.round((summary.open_incidents * 1200 + summary.open_alerts * 180) * rangeFactor);
-  const slaRisk = Math.min(99, Math.round((summary.open_incidents * 8 + summary.open_alerts * 2.3) * (warMode ? 1.2 : 1)));
+  const estImpactedUsers = Math.round((focusedOpenAlerts * 230 + focusedOpenIncidents * 900) * rangeFactor);
+  const estRevenueRisk = Math.round((focusedOpenIncidents * 1200 + focusedOpenAlerts * 180) * rangeFactor);
+  const slaRisk = Math.min(99, Math.round((focusedOpenIncidents * 8 + focusedOpenAlerts * 2.3) * (warMode ? 1.2 : 1)));
   const activeRegionsFromLocationTopology = topologyByLocation.filter((item) =>
     ensureArray(item.data?.nodes).some(
       (n) => toSafeCount(n?.open_alerts) > 0 || toSafeCount(n?.open_incidents) > 0
@@ -156,8 +159,8 @@ export default async function DashboardPage({ searchParams }) {
         </div>
         <div className={styles.topbarStats}>
           <AutoRefresh seconds={8} />
-          <StatusBadge status={`critical ${summary.open_alerts || 0}`} />
-          <StatusBadge status={`open incidents ${summary.open_incidents || 0}`} />
+          <StatusBadge status={`critical ${focusedOpenAlerts || 0}`} />
+          <StatusBadge status={`open incidents ${focusedOpenIncidents || 0}`} />
         </div>
       </div>
 
