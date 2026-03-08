@@ -4,6 +4,7 @@ import { StatusBadge } from "./components/ui";
 import AutoRefresh from "./components/auto-refresh";
 import SimulateControls from "./components/simulate-controls";
 import WidgetControlsBar from "./components/widget-controls-bar";
+import BlastRadiusPreview from "./components/BlastRadiusPreview";
 import WorldMap from "./components/world-map";
 import FloatingWidgets from "./components/floating-widgets";
 import styles from "./home.module.css";
