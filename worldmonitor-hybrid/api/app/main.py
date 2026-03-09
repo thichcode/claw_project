@@ -1,22 +1,38 @@
 import os
 import json
+import hashlib
+import hmac
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 import jwt
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from .db import execute, query_all, query_one
 
 
-JWT_SECRET = os.getenv("JWT_SECRET", "dev-secret")
+DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
+JWT_SECRET = os.getenv("JWT_SECRET", "dev-secret" if DEMO_MODE else "")
+
+if not JWT_SECRET:
+    raise RuntimeError("JWT_SECRET must be set when DEMO_MODE is false")
 
 app = FastAPI(title="WorldMonitor API", version="0.1.0")
 
 ALLOWED_SEVERITIES = {"critical", "high", "medium", "warning", "low", "error", "disaster", "p1", "p2", "p3", "info", "ok"}
 ALLOWED_ALERT_STATUSES = {"open", "acked"}
+
+
+@app.middleware("http")
+async def attach_request_id(request: Request, call_next):
+    request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+    request.state.request_id = request_id
+    response: Response = await call_next(request)
+    response.headers["x-request-id"] = request_id
+    return response
 
 
 def normalize_severity(value: Optional[str], default: str = "warning") -> str:
@@ -130,6 +146,277 @@ class TopologyKPI(BaseModel):
     blast_radius: str = "Low"
 
 
+def build_inventory_summary():
+    rows = query_all(
+        """
+        SELECT
+            s.id,
+            s.name,
+            s.environment,
+            s.owner,
+            s.source_key,
+            l.code as location_code,
+            COALESCE(a.open_alerts, 0) as open_alerts,
+            COALESCE(a.alert_rank, 0) as alert_rank,
+            COALESCE(i.open_incidents, 0) as open_incidents,
+            COALESCE(i.incident_rank, 0) as incident_rank
+        FROM services s
+        LEFT JOIN service_locations sl ON sl.service_id = s.id AND sl.is_primary = TRUE
+        LEFT JOIN locations l ON l.id = sl.location_id
+        LEFT JOIN (
+            SELECT service_id, COUNT(*) as open_alerts,
+            MAX(CASE
+                WHEN LOWER(COALESCE(severity, '')) IN ('critical','disaster','p1') THEN 3
+                WHEN LOWER(COALESCE(severity, '')) IN ('high','error','p2') THEN 2
+                WHEN LOWER(COALESCE(severity, '')) IN ('warning','medium','warn','p3') THEN 1
+                ELSE 0 END) as alert_rank
+            FROM alert_events WHERE status = 'open' GROUP BY service_id
+        ) a ON a.service_id = s.id
+        LEFT JOIN (
+            SELECT service_id, COUNT(*) as open_incidents,
+            MAX(CASE
+                WHEN LOWER(COALESCE(severity, '')) IN ('critical','disaster','p1') THEN 3
+                WHEN LOWER(COALESCE(severity, '')) IN ('high','error','p2') THEN 2
+                WHEN LOWER(COALESCE(severity, '')) IN ('warning','medium','warn','p3') THEN 1
+                ELSE 2 END) as incident_rank
+            FROM incidents WHERE status IN ('open', 'acked') GROUP BY service_id
+        ) i ON i.service_id = s.id
+        ORDER BY s.name ASC
+        """
+    )
+
+    systems = []
+    owners = set()
+    locations = set()
+    uncovered = 0
+    healthy = 0
+    degraded = 0
+    critical = 0
+
+    for row in rows:
+        health = derive_health(
+            row.get("open_alerts", 0),
+            row.get("open_incidents", 0),
+            row.get("alert_rank", 0),
+            row.get("incident_rank", 0),
+        )
+        owner = row.get("owner") or "unknown"
+        location_code = row.get("location_code") or None
+        if owner:
+            owners.add(owner)
+        if location_code:
+            locations.add(location_code)
+        else:
+            uncovered += 1
+
+        if health == "healthy":
+            healthy += 1
+        elif health == "warning":
+            degraded += 1
+        else:
+            critical += 1
+
+        systems.append(
+            {
+                "service_id": row["id"],
+                "name": row["name"],
+                "environment": row.get("environment") or "prod",
+                "owner": owner,
+                "location_code": location_code,
+                "source_key": row.get("source_key"),
+                "health": health,
+                "open_alerts": row.get("open_alerts", 0),
+                "open_incidents": row.get("open_incidents", 0),
+                "coverage": "mapped" if location_code else "unmapped",
+            }
+        )
+
+    return {
+        "generated_at": now_iso(),
+        "summary": {
+            "total_systems": len(systems),
+            "healthy_systems": healthy,
+            "degraded_systems": degraded,
+            "critical_systems": critical,
+            "mapped_systems": len(systems) - uncovered,
+            "unmapped_systems": uncovered,
+            "owners": len(owners),
+            "locations": len(locations),
+            "coverage_ratio": round(((len(systems) - uncovered) / len(systems)), 3) if systems else 0,
+        },
+        "systems": systems,
+        "owner_matrix": build_owner_matrix(systems),
+        "risk_summary": build_inventory_risk_summary(systems),
+    }
+
+
+def build_owner_matrix(systems: list[dict]):
+    owner_map = {}
+    for system in systems:
+        owner = system.get("owner") or "unknown"
+        row = owner_map.setdefault(
+            owner,
+            {
+                "owner": owner,
+                "total_systems": 0,
+                "healthy": 0,
+                "degraded": 0,
+                "critical": 0,
+                "mapped": 0,
+                "unmapped": 0,
+            },
+        )
+        row["total_systems"] += 1
+        row[system.get("health") if system.get("health") in {"healthy", "warning", "critical"} else "healthy"] += 1 if system.get("health") != "warning" else 0
+        if system.get("health") == "warning":
+            row["degraded"] += 1
+        elif system.get("health") == "critical":
+            row["critical"] += 1
+        elif system.get("health") == "healthy":
+            row["healthy"] += 1
+        if system.get("coverage") == "mapped":
+            row["mapped"] += 1
+        else:
+            row["unmapped"] += 1
+
+    return sorted(owner_map.values(), key=lambda item: (-item["critical"], -item["degraded"], item["owner"]))
+
+
+def build_inventory_risk_summary(systems: list[dict]):
+    unmapped_critical = [s for s in systems if s.get("coverage") == "unmapped" and s.get("health") == "critical"]
+    unmapped_degraded = [s for s in systems if s.get("coverage") == "unmapped" and s.get("health") == "warning"]
+    ownerless = [s for s in systems if (s.get("owner") or "unknown") == "unknown"]
+    return {
+        "unmapped_critical": len(unmapped_critical),
+        "unmapped_degraded": len(unmapped_degraded),
+        "ownerless_systems": len(ownerless),
+        "priority_actions": [
+            f"Map {len(unmapped_critical)} critical systems to locations" if unmapped_critical else None,
+            f"Assign owners to {len(ownerless)} systems" if ownerless else None,
+            f"Review {len(unmapped_degraded)} degraded unmapped systems" if unmapped_degraded else None,
+        ],
+    }
+
+
+def build_health_matrix(systems: list[dict]):
+    matrix = {}
+    for system in systems:
+        env = system.get("environment") or "prod"
+        location = system.get("location_code") or "unmapped"
+        key = f"{env}:{location}"
+        row = matrix.setdefault(
+            key,
+            {
+                "environment": env,
+                "location_code": location,
+                "total_systems": 0,
+                "healthy": 0,
+                "degraded": 0,
+                "critical": 0,
+            },
+        )
+        row["total_systems"] += 1
+        if system.get("health") == "critical":
+            row["critical"] += 1
+        elif system.get("health") == "warning":
+            row["degraded"] += 1
+        else:
+            row["healthy"] += 1
+    return sorted(matrix.values(), key=lambda item: (-item["critical"], -item["degraded"], item["environment"], item["location_code"]))
+
+
+def build_rca_summary(incident: dict, hypotheses: list, timeline: list, impacted: list):
+    top_hypothesis = hypotheses[0] if hypotheses else None
+    likely_root_cause = top_hypothesis.get("hypothesis") if top_hypothesis else "Insufficient evidence"
+    evidence_count = len(hypotheses) + len(timeline)
+    impact_count = len(impacted)
+    impact_names = [item.get("name") for item in impacted if item.get("name")]
+    return {
+        "likely_root_cause": likely_root_cause,
+        "evidence_count": evidence_count,
+        "timeline_events": len(timeline),
+        "impacted_services_count": impact_count,
+        "impacted_services_preview": impact_names[:5],
+        "incident_story": (
+            f"Incident '{incident.get('title')}' likely originated from {incident.get('service_name') or 'an unknown service'}; "
+            f"{impact_count} downstream services appear impacted."
+        ),
+    }
+
+
+def build_topology_summary(nodes: list, edges: list):
+    relation_counts = {}
+    layer_counts = {}
+    critical_paths = []
+    for edge in edges:
+        relation = str(edge.get("relation") or "depends_on").lower()
+        relation_counts[relation] = relation_counts.get(relation, 0) + 1
+        inferred_layer = {
+            "runtime_call": "application",
+            "data_store": "data",
+            "cache_layer": "cache",
+            "traffic_route": "network",
+            "depends_on": "application",
+        }.get(relation, "other")
+        layer_counts[inferred_layer] = layer_counts.get(inferred_layer, 0) + 1
+        if str(edge.get("criticality") or "").lower() in {"high", "critical"}:
+            critical_paths.append(
+                {
+                    "from_service_id": edge.get("from_service_id"),
+                    "to_service_id": edge.get("to_service_id"),
+                    "relation": relation,
+                    "criticality": edge.get("criticality") or "medium",
+                    "layer": inferred_layer,
+                }
+            )
+    unhealthy_nodes = [n for n in nodes if str(n.get("health") or "healthy").lower() != "healthy"]
+    return {
+        "relation_counts": relation_counts,
+        "layer_counts": layer_counts,
+        "critical_paths": critical_paths[:10],
+        "unhealthy_nodes_count": len(unhealthy_nodes),
+    }
+
+
+def build_rca_evidence_sections(timeline: list, impacted: list, hypotheses: list):
+    change_events = [
+        {
+            "ts": item.get("ts"),
+            "title": item.get("title"),
+            "source": item.get("source"),
+            "event_type": item.get("event_type"),
+        }
+        for item in timeline
+        if str(item.get("event_type") or "").lower() in {"deploy", "change", "config_change", "release"}
+    ]
+    return {
+        "timeline_signals": [
+            {
+                "ts": item.get("ts"),
+                "event_type": item.get("event_type"),
+                "title": item.get("title"),
+            }
+            for item in timeline[:8]
+        ],
+        "dependency_impacts": [
+            {
+                "service_name": item.get("name"),
+                "criticality": item.get("criticality"),
+            }
+            for item in impacted[:8]
+        ],
+        "ranked_hypotheses": [
+            {
+                "rank": item.get("rank"),
+                "hypothesis": item.get("hypothesis"),
+                "confidence": item.get("confidence"),
+            }
+            for item in hypotheses[:5]
+        ],
+        "change_events": change_events[:6],
+    }
+
+
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
@@ -143,15 +430,51 @@ def sign_token(user_id: int, username: str):
     return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 
+def verify_password(password: str, stored_value: str) -> bool:
+    if stored_value.startswith("pbkdf2_sha256$"):
+        try:
+            _, iterations, salt, expected = stored_value.split("$", 3)
+            derived = hashlib.pbkdf2_hmac(
+                "sha256",
+                password.encode("utf-8"),
+                salt.encode("utf-8"),
+                int(iterations),
+            ).hex()
+            return hmac.compare_digest(derived, expected)
+        except Exception:
+            return False
+    if DEMO_MODE:
+        return hmac.compare_digest(stored_value, password)
+    return False
+
+
 def auth_user(authorization: Optional[str] = Header(default=None)):
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Missing bearer token")
     token = authorization.split(" ", 1)[1]
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-        return {"id": int(payload["sub"]), "username": payload["username"]}
+        user = query_one("SELECT id, username, role FROM users WHERE id = %s", (int(payload["sub"]),))
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+        return {"id": int(user["id"]), "username": user["username"], "role": user.get("role") or "operator"}
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+
+def require_admin(user: dict):
+    if str(user.get("role") or "").lower() != "admin":
+        raise HTTPException(status_code=403, detail="Admin role required")
+
+
+def write_audit_log(actor_id: int, action: str, resource_type: str, resource_id: str, details: Optional[dict] = None):
+    execute(
+        """
+        INSERT INTO audit_logs(actor_id, action, resource_type, resource_id, details)
+        VALUES (%s, %s, %s, %s, %s::jsonb)
+        """,
+        (actor_id, action, resource_type, resource_id, json.dumps(details or {})),
+    )
 
 
 @app.get("/healthz")
@@ -174,7 +497,7 @@ def login(body: LoginRequest):
         "SELECT id, username, password_hash FROM users WHERE username = %s",
         (body.username,),
     )
-    if not user or user["password_hash"] != body.password:
+    if not user or not verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     token = sign_token(user["id"], user["username"])
@@ -577,6 +900,7 @@ def ack_alert(alert_id: int, body: AckRequest, user=Depends(auth_user)):
     )
     if not row:
         raise HTTPException(status_code=409, detail="Alert is not in open state")
+    write_audit_log(user["id"], "ack_alert", "alert", str(alert_id), {"ack_note": body.ack_note})
     return row
 
 
@@ -615,6 +939,7 @@ def create_incident(body: IncidentCreate, user=Depends(auth_user)):
         """,
         (row["id"], user["id"], '{"message":"incident created"}'),
     )
+    write_audit_log(user["id"], "create_incident", "incident", str(row["id"]), {"title": body.title, "severity": body.severity})
     return row
 
 
@@ -687,6 +1012,7 @@ def ack_incident(incident_id: int, body: IncidentAck, user=Depends(auth_user)):
         """,
         (incident_id, user["id"], json.dumps({"ack_note": body.ack_note or "acknowledged"})),
     )
+    write_audit_log(user["id"], "ack_incident", "incident", str(incident_id), {"ack_note": body.ack_note})
     return row
 
 
@@ -713,6 +1039,7 @@ def assign_incident(incident_id: int, body: IncidentAssign, user=Depends(auth_us
         """,
         (incident_id, user["id"], f'{{"assignee_id": {body.assignee_id}}}'),
     )
+    write_audit_log(user["id"], "assign_incident", "incident", str(incident_id), {"assignee_id": body.assignee_id})
     return row
 
 
@@ -729,6 +1056,7 @@ def comment_incident(incident_id: int, body: IncidentComment, user=Depends(auth_
         """,
         (incident_id, user["id"], json.dumps({"comment": body.comment})),
     )
+    write_audit_log(user["id"], "comment_incident", "incident", str(incident_id), {"comment": body.comment})
     return {"ok": True}
 
 
@@ -762,6 +1090,7 @@ def resolve_incident(incident_id: int, user=Depends(auth_user)):
         """,
         (incident_id, user["id"], '{"message":"incident resolved"}'),
     )
+    write_audit_log(user["id"], "resolve_incident", "incident", str(incident_id), {})
     return row
 
 
@@ -948,6 +1277,7 @@ def topology(env: Optional[str] = "prod", location_code: Optional[str] = None, _
         "generated_at": now_iso(),
         "nodes": normalized_nodes,
         "edges": normalized_edges,
+        "topology_summary": build_topology_summary(normalized_nodes, normalized_edges),
         "kpi": TopologyKPI(
             affected_services=affected_services,
             critical_edges=critical_edges,
@@ -1018,12 +1348,17 @@ def incident_rca(incident_id: int, _: dict = Depends(auth_user)):
         "hypotheses": hypotheses,
         "timeline": timeline,
         "impacted_services": impacted,
+        "rca_summary": build_rca_summary(incident, hypotheses, timeline, impacted),
+        "evidence_sections": build_rca_evidence_sections(timeline, impacted, hypotheses),
         "generated_at": now_iso(),
     }
 
 
 @app.post("/demo/reset")
 def demo_reset(user=Depends(auth_user)):
+    if not DEMO_MODE:
+        raise HTTPException(status_code=403, detail="Demo reset is disabled")
+    require_admin(user)
     # demo-only bulk reset to make presets clearly visible
     execute(
         """
@@ -1040,6 +1375,7 @@ def demo_reset(user=Depends(auth_user)):
         WHERE status IN ('open','acked')
         """
     )
+    write_audit_log(user["id"], "demo_reset", "system", "demo", {})
     return {"ok": True}
 
 
@@ -1072,4 +1408,11 @@ def summary(_: dict = Depends(auth_user)):
         "services_with_location": services_with_location,
         "location_coverage": round((services_with_location / total_services), 3) if total_services else 0,
     }
+    return data
+
+
+@app.get("/inventory/overview")
+def inventory_overview(_: dict = Depends(auth_user)):
+    data = build_inventory_summary()
+    data["health_matrix"] = build_health_matrix(data.get("systems", []))
     return data

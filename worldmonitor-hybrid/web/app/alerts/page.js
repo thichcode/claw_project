@@ -6,9 +6,17 @@ import AckButton from "./ack-button";
 export default async function AlertsPage({ searchParams }) {
   const statusFilter = searchParams?.status;
   const locationFilter = searchParams?.location;
+  let degraded = false;
 
-  const alertsRaw = await safeApiGet("/alerts", mockAlerts);
-  const locations = await safeApiGet("/locations", []);
+  let alertsRaw = mockAlerts;
+  let locations = [];
+
+  try {
+    alertsRaw = await safeApiGet("/alerts", mockAlerts);
+    locations = await safeApiGet("/locations", []);
+  } catch {
+    degraded = true;
+  }
 
   let alerts = Array.isArray(alertsRaw) ? alertsRaw : [];
 
@@ -46,6 +54,14 @@ export default async function AlertsPage({ searchParams }) {
           </a>
         ))}
       </div>
+
+      {degraded ? (
+        <PanelCard>
+          <div style={{ color: "#fca5a5", fontSize: 13 }}>
+            Alerts live data is unavailable. Showing fallback content.
+          </div>
+        </PanelCard>
+      ) : null}
 
       <PanelCard>
         <SectionTitle title="Live queue" meta={`${alerts.length} alerts`} />

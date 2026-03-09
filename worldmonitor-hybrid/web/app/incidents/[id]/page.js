@@ -4,7 +4,14 @@ import { PanelCard, StatusBadge } from "../../components/ui";
 import IncidentActions from "./IncidentActions";
 
 export default async function IncidentDetailPage({ params }) {
-  const data = await safeApiGet(`/incidents/${params.id}`, mockIncidentDetail);
+  let degraded = false;
+  let data = mockIncidentDetail;
+
+  try {
+    data = await safeApiGet(`/incidents/${params.id}`, mockIncidentDetail);
+  } catch {
+    degraded = true;
+  }
   const incident = data?.incident || {};
   const events = Array.isArray(data?.events) ? data.events : [];
 
@@ -12,6 +19,14 @@ export default async function IncidentDetailPage({ params }) {
     <main>
       <h1 className="wm-page-title">Incident #{incident.id || "-"}</h1>
       <p className="wm-subtitle">RCA context and response actions.</p>
+
+      {degraded ? (
+        <PanelCard>
+          <div style={{ color: "#fca5a5", fontSize: 13 }}>
+            Incident detail data is unavailable. Showing fallback content.
+          </div>
+        </PanelCard>
+      ) : null}
 
       <div className="wm-grid-2">
         <PanelCard title={incident.title || "Untitled incident"}>

@@ -4,8 +4,16 @@ import { DataTable, MetricTile, PageHeader, PanelCard, SectionTitle, StatusBadge
 
 export default async function IncidentsPage({ searchParams }) {
   const locationFilter = searchParams?.location;
-  const incidentsRaw = await safeApiGet("/incidents", mockIncidents);
-  const locations = await safeApiGet("/locations", []);
+  let degraded = false;
+  let incidentsRaw = mockIncidents;
+  let locations = [];
+
+  try {
+    incidentsRaw = await safeApiGet("/incidents", mockIncidents);
+    locations = await safeApiGet("/locations", []);
+  } catch {
+    degraded = true;
+  }
 
   let incidents = Array.isArray(incidentsRaw) ? incidentsRaw : [];
   if (locationFilter) {
@@ -27,6 +35,14 @@ export default async function IncidentsPage({ searchParams }) {
           </a>
         ))}
       </div>
+
+      {degraded ? (
+        <PanelCard>
+          <div style={{ color: "#fca5a5", fontSize: 13 }}>
+            Incident live data is unavailable. Showing fallback content.
+          </div>
+        </PanelCard>
+      ) : null}
 
       <div className="wm-grid-3" style={{ marginBottom: 14 }}>
         <MetricTile value={incidents.length} label="Total incidents" tone="info" />

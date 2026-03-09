@@ -22,7 +22,8 @@ services:
     build: ./api
     environment:
       DATABASE_URL: postgresql://wm:wm@postgres:5432/worldmonitor
-      JWT_SECRET: dev-secret
+      JWT_SECRET: ${JWT_SECRET:-dev-secret}
+      DEMO_MODE: ${DEMO_MODE:-true}
       REDIS_URL: redis://redis:6379/0
     ports:
       - "8000:8000"
@@ -35,6 +36,9 @@ services:
     environment:
       API_URL_INTERNAL: http://api:8000
       NEXT_PUBLIC_API_URL: http://localhost:8000
+      DEMO_MODE: ${DEMO_MODE:-true}
+      DEMO_USERNAME: ${DEMO_USERNAME:-admin}
+      DEMO_PASSWORD: ${DEMO_PASSWORD:-admin}
     ports:
       - "3000:3000"
     depends_on:

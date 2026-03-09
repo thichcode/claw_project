@@ -3,12 +3,27 @@ import { executiveHotspots, mockSummary } from "../mockData";
 import { HotspotTable, KPI, PanelCard, StatusBadge } from "../components/ui";
 
 export default async function ExecutivePage() {
-  const summary = await safeApiGet("/summary", mockSummary);
+  let summary = mockSummary;
+  let degraded = false;
+
+  try {
+    summary = await safeApiGet("/summary", mockSummary);
+  } catch {
+    degraded = true;
+  }
 
   return (
     <main>
       <h1 className="wm-page-title">Executive Overview</h1>
       <p className="wm-subtitle">Snapshot for fast operational decisions.</p>
+
+      {degraded ? (
+        <PanelCard>
+          <div style={{ color: "#fca5a5", fontSize: 13 }}>
+            Executive data is temporarily unavailable. Showing limited fallback values.
+          </div>
+        </PanelCard>
+      ) : null}
 
       <PanelCard>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>

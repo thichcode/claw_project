@@ -1,5 +1,5 @@
 import { safeApiGet } from "./lib";
-import { mockSummary } from "./mockData";
+import { mockInventoryOverview, mockSummary } from "./mockData";
 import { StatusBadge } from "./components/ui";
 import AutoRefresh from "./components/auto-refresh";
 import SimulateControls from "./components/simulate-controls";
@@ -53,6 +53,7 @@ export default async function DashboardPage({ searchParams }) {
   const rangeParam = String(searchParams?.range || "1h").trim();
   const range = ["15m", "1h", "24h"].includes(rangeParam) ? rangeParam : "1h";
   const summaryRaw = await safeApiGet("/summary", mockSummary);
+  const inventoryRaw = await safeApiGet("/inventory/overview", mockInventoryOverview);
   const summary = {
     ...mockSummary,
     ...(summaryRaw || {}),
@@ -61,6 +62,10 @@ export default async function DashboardPage({ searchParams }) {
   };
   const dataWindow = String(summaryRaw?.data_window || range).trim() || range;
   const isSimulated = !summaryRaw || summaryRaw?.simulated === true;
+  const inventorySummary = inventoryRaw?.summary || mockInventoryOverview.summary;
+  const ownerMatrix = inventoryRaw?.owner_matrix || mockInventoryOverview.owner_matrix || [];
+  const riskSummary = inventoryRaw?.risk_summary || mockInventoryOverview.risk_summary || {};
+  const healthMatrix = inventoryRaw?.health_matrix || mockInventoryOverview.health_matrix || [];
   const locationsRaw = await safeApiGet("/locations", []);
   const normalizedLocations = Array.from(
     new Map(
@@ -315,6 +320,88 @@ export default async function DashboardPage({ searchParams }) {
               <span>Revenue exposure</span>
               <strong>${estRevenueRisk.toLocaleString()}/hr</strong>
             </div>
+          </div>
+        </details>
+
+        <details className={styles.foldPanel} open>
+          <summary className={styles.foldSummary}>
+            <span>System Inventory Coverage</span>
+            <span className={styles.foldPill}>{inventorySummary.total_systems || 0} systems</span>
+          </summary>
+          <div className={styles.foldBody}>
+            <div className={styles.foldRow}>
+              <span>Healthy / Degraded / Critical</span>
+              <strong>{inventorySummary.healthy_systems || 0} / {inventorySummary.degraded_systems || 0} / {inventorySummary.critical_systems || 0}</strong>
+            </div>
+            <div className={styles.foldRow}>
+              <span>Mapped to locations</span>
+              <strong>{inventorySummary.mapped_systems || 0} / {inventorySummary.total_systems || 0}</strong>
+            </div>
+            <div className={styles.foldRow}>
+              <span>Coverage ratio</span>
+              <strong>{Math.round((inventorySummary.coverage_ratio || 0) * 100)}%</strong>
+            </div>
+            <div className={styles.foldRow}>
+              <span>Distinct owners / locations</span>
+              <strong>{inventorySummary.owners || 0} / {inventorySummary.locations || 0}</strong>
+            </div>
+          </div>
+        </details>
+
+        <details className={styles.foldPanel} open>
+          <summary className={styles.foldSummary}>
+            <span>Ownership & Coverage Risk</span>
+            <span className={styles.foldPill}>{riskSummary.unmapped_critical || 0} critical gaps</span>
+          </summary>
+          <div className={styles.foldBody}>
+            <div className={styles.foldRow}>
+              <span>Unmapped critical systems</span>
+              <strong>{riskSummary.unmapped_critical || 0}</strong>
+            </div>
+            <div className={styles.foldRow}>
+              <span>Unmapped degraded systems</span>
+              <strong>{riskSummary.unmapped_degraded || 0}</strong>
+            </div>
+            <div className={styles.foldRow}>
+              <span>Ownerless systems</span>
+              <strong>{riskSummary.ownerless_systems || 0}</strong>
+            </div>
+            {(riskSummary.priority_actions || []).filter(Boolean).map((item, idx) => (
+              <div key={`${item}-${idx}`} className={styles.foldRow}>
+                <span>Action</span>
+                <strong>{item}</strong>
+              </div>
+            ))}
+          </div>
+        </details>
+
+        <details className={styles.foldPanel} open>
+          <summary className={styles.foldSummary}>
+            <span>Owner Health Matrix</span>
+            <span className={styles.foldPill}>{ownerMatrix.length} owners</span>
+          </summary>
+          <div className={styles.foldBody}>
+            {ownerMatrix.slice(0, 5).map((row) => (
+              <div key={row.owner} className={styles.foldRow}>
+                <span>{row.owner}</span>
+                <strong>{row.total_systems} sys · H{row.healthy} / D{row.degraded} / C{row.critical}</strong>
+              </div>
+            ))}
+          </div>
+        </details>
+
+        <details className={styles.foldPanel} open>
+          <summary className={styles.foldSummary}>
+            <span>Health Matrix by Environment / Location</span>
+            <span className={styles.foldPill}>{healthMatrix.length} cells</span>
+          </summary>
+          <div className={styles.foldBody}>
+            {healthMatrix.slice(0, 6).map((row, idx) => (
+              <div key={`${row.environment}-${row.location_code}-${idx}`} className={styles.foldRow}>
+                <span>{row.environment} · {row.location_code}</span>
+                <strong>{row.total_systems} sys · H{row.healthy} / D{row.degraded} / C{row.critical}</strong>
+              </div>
+            ))}
           </div>
         </details>
 

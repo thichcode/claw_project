@@ -1,16 +1,33 @@
 import json
 import os
+import hashlib
 import sys
+from datetime import datetime, timedelta, timezone
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from app.db import execute, query_one  # noqa: E402
 
 
+def hash_password(password: str, salt: str) -> str:
+    iterations = 120000
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt.encode("utf-8"),
+        iterations,
+    ).hex()
+    return f"pbkdf2_sha256${iterations}${salt}${digest}"
+
+
+def iso_ago(minutes: int) -> str:
+    return (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
+
+
 def run():
     users = [
-        ("admin", "admin", "admin"),
-        ("alice", "alice", "operator"),
-        ("iam-oncall", "iam", "operator"),
+        ("admin", hash_password("admin", "wm-admin"), "admin"),
+        ("alice", hash_password("alice", "wm-alice"), "operator"),
+        ("iam-oncall", hash_password("iam", "wm-iam-oncall"), "operator"),
     ]
     for u in users:
         execute(
@@ -116,6 +133,22 @@ def run():
             ON CONFLICT DO NOTHING
             """,
             (inc["id"], "Cache pressure increasing auth response time", 0.63, 2, json.dumps({"signal": "cache memory"})),
+        )
+        execute(
+            """
+            INSERT INTO incident_timeline(incident_id, event_time, event_type, title, details, source, actor_id)
+            VALUES (%s, %s, 'deploy', %s, %s::jsonb, 'ci/cd', %s)
+            ON CONFLICT DO NOTHING
+            """,
+            (inc["id"], iso_ago(25), "Deploy auth-service v2026.03.04-15", json.dumps({"version": "v2026.03.04-15", "change_ticket": "CHG-1042"}), admin["id"]),
+        )
+        execute(
+            """
+            INSERT INTO incident_timeline(incident_id, event_time, event_type, title, details, source, actor_id)
+            VALUES (%s, %s, 'config_change', %s, %s::jsonb, 'platform', %s)
+            ON CONFLICT DO NOTHING
+            """,
+            (inc["id"], iso_ago(18), "Redis maxmemory policy changed", json.dumps({"policy": "allkeys-lru"}), admin["id"]),
         )
 
     print("Seed complete")

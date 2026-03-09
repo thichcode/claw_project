@@ -1,12 +1,17 @@
 import { NextResponse } from "next/server";
 
 const INTERNAL = process.env.API_URL_INTERNAL || "http://localhost:8000";
+const DEMO_MODE = process.env.DEMO_MODE === "true";
+const DEMO_USERNAME = process.env.DEMO_USERNAME;
+const DEMO_PASSWORD = process.env.DEMO_PASSWORD;
 
 async function login() {
+  if (!DEMO_MODE) throw new Error("Simulation is disabled outside DEMO_MODE");
+  if (!DEMO_USERNAME || !DEMO_PASSWORD) throw new Error("Missing demo credentials");
   const r = await fetch(`${INTERNAL}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username: "admin", password: "admin" }),
+    body: JSON.stringify({ username: DEMO_USERNAME, password: DEMO_PASSWORD }),
     cache: "no-store",
   });
   if (!r.ok) throw new Error("login failed");
@@ -20,6 +25,9 @@ function pick(arr) {
 
 export async function POST(req) {
   try {
+    if (!DEMO_MODE) {
+      return NextResponse.json({ error: "Simulation disabled" }, { status: 403 });
+    }
     const body = await req.json().catch(() => ({}));
     const preset = String(body?.preset || "normal").toLowerCase();
     const resetBeforeInject = body?.reset !== false;
@@ -113,6 +121,6 @@ export async function POST(req) {
 
     return NextResponse.json({ ok: true, preset, events, incidents, resetAlerts, resetIncidents });
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    return NextResponse.json({ error: "Simulation failed" }, { status: 500 });
   }
 }
