@@ -41,6 +41,21 @@ Health:
 }
 ```
 
+
+### Task orchestration (goal -> plan -> execute -> verify)
+
+`POST /api/tasks`
+```json
+{
+  "goal": "Tìm 5 nguồn, tóm tắt lại, viết draft email",
+  "requested_by": "mrthuong"
+}
+```
+
+`POST /api/tasks/{task_id}/run`
+
+`GET /api/tasks/{task_id}`
+
 ### Trigger scan/pipeline
 `POST /api/scan`
 ```json

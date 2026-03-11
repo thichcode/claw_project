@@ -160,3 +160,116 @@ def list_recent_audit(
     rows = cur.fetchall()
     conn.close()
     return rows
+
+
+def create_task(goal: str, requested_by: str) -> str:
+    task_id = str(uuid.uuid4())
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO tasks(task_id, goal, requested_by, status) VALUES (?, ?, ?, 'pending')",
+        (task_id, goal, requested_by),
+    )
+    conn.commit()
+    conn.close()
+    return task_id
+
+
+def get_task(task_id: str):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM tasks WHERE task_id = ?", (task_id,))
+    row = cur.fetchone()
+    conn.close()
+    return row
+
+
+def update_task_status(task_id: str, status: str) -> bool:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?",
+        (status, task_id),
+    )
+    changed = cur.rowcount > 0
+    conn.commit()
+    conn.close()
+    return changed
+
+
+def append_task_step(task_id: str, step: dict) -> bool:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO task_steps(task_id, step_index, title, tool_name, tool_input_json, status)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            task_id,
+            int(step["step_index"]),
+            step["title"],
+            step["tool_name"],
+            json.dumps(step.get("tool_input", {}), ensure_ascii=False),
+            step.get("status", "pending"),
+        ),
+    )
+    changed = cur.rowcount > 0
+    conn.commit()
+    conn.close()
+    return changed
+
+
+def update_task_step(task_id: str, step_index: int, step: dict) -> bool:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE task_steps
+        SET status = ?, output_json = ?, error = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE task_id = ? AND step_index = ?
+        """,
+        (
+            step.get("status", "pending"),
+            json.dumps(step.get("output"), ensure_ascii=False) if step.get("output") is not None else None,
+            step.get("error"),
+            task_id,
+            int(step_index),
+        ),
+    )
+    changed = cur.rowcount > 0
+    conn.commit()
+    conn.close()
+    return changed
+
+
+def list_task_steps(task_id: str):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT task_id, step_index, title, tool_name, tool_input_json, status, output_json, error, created_at, updated_at
+        FROM task_steps
+        WHERE task_id = ?
+        ORDER BY step_index ASC
+        """,
+        (task_id,),
+    )
+    rows = []
+    for row in cur.fetchall():
+        rows.append(
+            {
+                "task_id": row["task_id"],
+                "step_index": row["step_index"],
+                "title": row["title"],
+                "tool_name": row["tool_name"],
+                "tool_input": json.loads(row["tool_input_json"]),
+                "status": row["status"],
+                "output": json.loads(row["output_json"]) if row["output_json"] else None,
+                "error": row["error"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+        )
+    conn.close()
+    return rows

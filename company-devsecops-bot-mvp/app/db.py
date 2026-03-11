@@ -32,6 +32,37 @@ def init_db() -> None:
         )
         """
     )
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tasks (
+            task_id TEXT PRIMARY KEY,
+            goal TEXT NOT NULL,
+            requested_by TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS task_steps (
+            task_id TEXT NOT NULL,
+            step_index INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            tool_name TEXT NOT NULL,
+            tool_input_json TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            output_json TEXT,
+            error TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY(task_id, step_index)
+        )
+        """
+    )
+
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS audit_logs (
