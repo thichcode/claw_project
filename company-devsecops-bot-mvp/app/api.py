@@ -2,9 +2,17 @@ import json
 
 from fastapi import APIRouter
 
-from .models import ActionResponse, ApproveRequest, ChatRequest, DeployRequest, ScanRequest
+from .models import (
+    ActionResponse,
+    ApproveRequest,
+    ChatRequest,
+    DeployRequest,
+    ScanRequest,
+    TaskCreateRequest,
+)
 from .command_handler import handle_approve, handle_chat, handle_deploy, handle_scan
-from .store import get_request, list_recent_approvals, list_recent_audit
+from .orchestrator.task_manager import create_task_from_goal, run_task
+from .store import get_request, get_task, list_recent_approvals, list_recent_audit, list_task_steps
 
 router = APIRouter()
 
@@ -32,6 +40,39 @@ async def deploy(req: DeployRequest):
 @router.post("/approve", response_model=ActionResponse)
 async def approve(req: ApproveRequest):
     return await handle_approve(req.request_id, req.approver)
+
+
+@router.post("/tasks", response_model=ActionResponse)
+async def create_task(req: TaskCreateRequest):
+    task_id = await create_task_from_goal(req.goal, req.requested_by)
+    return ActionResponse(ok=True, message="Task created", request_id=task_id)
+
+
+@router.post("/tasks/{task_id}/run", response_model=ActionResponse)
+async def run_created_task(task_id: str):
+    res = await run_task(task_id)
+    return ActionResponse(ok=res["ok"], message=res["message"], request_id=task_id)
+
+
+@router.get("/tasks/{task_id}")
+def task_detail(task_id: str):
+    task = get_task(task_id)
+    if not task:
+        return {"ok": False, "message": "Task not found"}
+
+    steps = list_task_steps(task_id)
+    return {
+        "ok": True,
+        "task": {
+            "task_id": task["task_id"],
+            "goal": task["goal"],
+            "requested_by": task["requested_by"],
+            "status": task["status"],
+            "created_at": task["created_at"],
+            "updated_at": task["updated_at"],
+            "steps": steps,
+        },
+    }
 
 
 @router.get("/approvals/{request_id}")

@@ -27,3 +27,12 @@ class DeployRequest(BaseModel):
     env: str
     image_tag: str
     requested_by: str
+
+
+class TaskCreateRequest(BaseModel):
+    goal: str
+    requested_by: str
+
+
+class TaskRunRequest(BaseModel):
+    requested_by: str | None = None
