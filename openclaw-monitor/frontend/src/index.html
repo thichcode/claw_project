@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>OpenClaw Monitor</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>OpenClaw Activity</h1>
+        <p>Real-time log stream (SSE). Streams fallback to <code>journalctl</code> when needed.</p>
+      </div>
+      <div class="controls">
+        <input placeholder="filter text" id="filterText" />
+        <select id="filterLevel">
+          <option value="">All</option>
+          <option>info</option>
+          <option>warn</option>
+          <option>error</option>
+        </select>
+        <button id="toggleStream">Pause</button>
+        <button id="downloadLogs">Download</button>
+      </div>
+    </header>
+    <section class="status" id="status">Connecting...</section>
+    <section id="logList" class="log-list"></section>
+  </main>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

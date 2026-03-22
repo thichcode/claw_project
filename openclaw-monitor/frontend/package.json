@@ -1,0 +1,14 @@
+{
+  "name": "openclaw-monitor-frontend",
+  "version": "0.1.0",
+  "scripts": {
+    "start": "parcel serve src/index.html --port 3000",
+    "dev": "parcel serve src/index.html --open --port 3000"
+  },
+  "dependencies": {
+    "lodash": "4.17.21"
+  },
+  "devDependencies": {
+    "parcel": "^2.9.3"
+  }
+}

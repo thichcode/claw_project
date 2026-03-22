@@ -1,0 +1,14 @@
+{
+  "name": "openclaw-monitor-backend",
+  "version": "0.1.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "NODE_ENV=development node server.js"
+  },
+  "dependencies": {
+    "express": "4.18.2",
+    "ws": "8.13.0",
+    "eventsource": "1.1.1"
+  }
+}
