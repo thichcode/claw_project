@@ -6,7 +6,7 @@
     "dev": "parcel serve src/index.html --open --port 3000"
   },
   "dependencies": {
-    "lodash": "4.17.21"
+    "lodash": "4.17.23"
   },
   "devDependencies": {
     "parcel": "^2.9.3"
