@@ -10,10 +10,17 @@ MVP bot nền tảng nội bộ cho DevSecOps use-cases (không dùng OpenClaw r
 
 ```bash
 cd company-devsecops-bot-mvp
+bash scripts/bootstrap.sh
+source .venv/bin/activate
+```
+
+Windows (PowerShell):
+```powershell
+cd company-devsecops-bot-mvp
 python -m venv .venv
-.venv\Scripts\activate
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-copy .env.example .env
+Copy-Item .env.example .env
 ```
 
 Chỉnh `.env`:
@@ -24,11 +31,25 @@ Chỉnh `.env`:
 ## 2) Run local
 
 ```bash
+bash scripts/dev.sh
+```
+
+Hoặc chạy trực tiếp:
+```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 ```
 
 Health:
 - `GET http://localhost:8080/api/health`
+
+
+## 2.1) Smoke test
+
+Sau khi app đang chạy, test nhanh luồng task:
+
+```bash
+bash scripts/smoke_task_flow.sh
+```
 
 ## 3) API nhanh
 
